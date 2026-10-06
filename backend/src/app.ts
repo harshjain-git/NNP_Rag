@@ -1,4 +1,5 @@
 import express from "express";
+import documentsRoutes from "./routes/documents.routes.js";
 
 const app = express();
 
@@ -9,5 +10,7 @@ app.get("/", (_req, res) => {
     message: "NNT RAG Backend is running",
   });
 });
+
+app.use("/api/documents", documentsRoutes);
 
 export default app;
