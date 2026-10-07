@@ -2,7 +2,11 @@ import fs from "node:fs";
 import { LlamaCloud } from "@llamaindex/llama-cloud";
 import { LLAMAPARSE_API_KEY } from "../../config/env.js";
 
+import { cleanText } from "./cleaner.js";
+
 const client = new LlamaCloud({ apiKey: LLAMAPARSE_API_KEY });
+
+export { cleanText } from "./cleaner.js";
 
 export interface ParsedPage {
   pageNumber: number;
@@ -50,7 +54,7 @@ export const parseDocument = async (
       const p = page as { page_number: number; markdown: string };
       return {
         pageNumber: p.page_number,
-        text: p.markdown,
+        text: cleanText(p.markdown),
       };
     });
 
@@ -61,3 +65,4 @@ export const parseDocument = async (
     pages,
   };
 };
+

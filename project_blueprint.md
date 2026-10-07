@@ -613,32 +613,37 @@ Exact chunk size and overlap will be evaluated during RAG quality testing rather
 
 # 16. Embedding Architecture
 
-The application will support two categories of embeddings.
+The application supports a modular embedding architecture with provider abstraction.
 
-## 16.1 Local Embeddings
+## 16.1 Local Embeddings (Phase 1 Implemented & Verified)
 
-A local embedding model such as a BGE-family or similar model may be used.
+The primary embedding solution for Phase 1 is a local model running in-process via Transformers.js:
+
+- **Model:** `Xenova/jina-embeddings-v2-small-en`
+- **Runtime:** Transformers.js via `@xenova/transformers`
+- **Vector Dimension:** `512` (matches `vector(512)` in Supabase PostgreSQL pgvector)
+- **Pooling Strategy:** Mean pooling (`pooling: "mean"`)
+- **Normalization:** L2 normalization (`normalize: true`), ensuring unit-norm vectors for exact cosine similarity search
+- **Provider Implementation:** `LocalEmbeddingProvider` in `src/providers/embeddings/local.ts` with reusable singleton pipeline caching to avoid per-chunk model re-initialization
+- **Verification:** Verified in Node.js on real document chunks with confirmed 512-dimensional float outputs and unit norm (~1.0000)
 
 Advantages:
 
-- No external API dependency.
-- Greater control.
-- Potentially lower recurring API cost.
-- Data can remain local.
-
-The exact model and vector dimension will be finalized before the production vector schema is created.
+- No external API dependency or rate limits.
+- Zero per-token inference cost.
+- Complete data privacy (documents never leave the local backend during embedding).
+- Consistent vector space between document chunks and user query embeddings.
 
 ---
 
-## 16.2 API Embeddings
+## 16.2 API Embeddings (Configurable Future Option)
 
-An API-based embedding provider may also be supported.
+An API-based embedding provider remains supported in the architecture as a future/configurable option:
 
-Candidate:
-
-- Gemini embeddings.
-
-The embedding provider should be configurable rather than tightly coupled to the RAG implementation.
+- **Candidate:** Google Gemini embeddings.
+- **Role:** Alternative or high-throughput cloud provider option.
+- **Integration:** Plugs into the same `EmbeddingProvider` interface without altering ingestion or retrieval logic.
+- The embedding provider should be configurable rather than tightly coupled to the RAG implementation.
 
 ---
 
@@ -909,21 +914,24 @@ This allows changing the generator without rewriting the complete RAG pipeline.
 
 # 23. Embedding Provider Abstraction
 
-Embeddings should follow a similar abstraction:
+Embeddings follow a provider abstraction to isolate model-specific execution:
 
 ```text
-Embedding Service
-       ↓
-Embedding Provider
-       ↓
- ┌──────────────┬──────────────┐
- ↓              ↓
-Local Model     API Provider
-                 ↓
-               Gemini
+Ingestion / RAG Service
+          ↓
+  EmbeddingProvider (Interface)
+          ↓
+  ┌───────────────────────────┬───────────────────────────┐
+  ↓                                                       ↓
+LocalEmbeddingProvider (Active)                 ApiEmbeddingProvider (Future Option)
+Xenova/jina-embeddings-v2-small-en                       Gemini Embeddings
+@xenova/transformers (512 dims)
 ```
 
-The application should keep embedding-provider-specific logic isolated.
+The application keeps embedding-provider-specific logic isolated within `src/providers/embeddings/`:
+- `types.ts`: Defines the `EmbeddingProvider` contract (`generateEmbedding`, `generateEmbeddings`, `modelName`, `dimensions`).
+- `local.ts`: Active implementation of `LocalEmbeddingProvider` using `@xenova/transformers` with singleton pipeline caching.
+- `index.ts`: Provider factory (`getEmbeddingProvider`) defaulting to the local provider.
 
 ---
 
@@ -1202,8 +1210,17 @@ Local Llama / Ollama
 
 ## Embedding Providers
 
+Phase 1 (Selected):
+
 ```text
-Local BGE or similar embedding model
+Xenova/jina-embeddings-v2-small-en via Transformers.js
+```
+
+- Selected Phase 1 embedding model using 512-dimensional embeddings for both documents and queries.
+
+Future Alternative:
+
+```text
 Gemini/API embedding provider
 ```
 
@@ -1517,6 +1534,19 @@ Phase 1 requires both relational and vector data, and PostgreSQL can handle both
 
 Impact:
 No separate vector database is required initially.
+```
+
+```text
+Date: 2026-10-07
+
+Decision:
+Adopt Xenova/jina-embeddings-v2-small-en via Transformers.js (@xenova/transformers) as the primary Phase 1 embedding model.
+
+Reason:
+Phase 1 requires a reliable, local, zero-cost, privacy-preserving embedding generation layer. The model produces 512-dimensional L2-normalized embeddings via mean pooling, perfectly matching our pgvector vector(512) database schema.
+
+Impact:
+Implemented in `src/providers/embeddings/local.ts` with singleton pipeline caching. Verified on a real parsed document chunk with confirmed 512-dimensional unit-norm output (~325ms latency). API embeddings (e.g. Gemini) remain an architectural option behind the `EmbeddingProvider` interface.
 ```
 
 ---
