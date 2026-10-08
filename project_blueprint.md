@@ -224,8 +224,9 @@ Exact permissions will be implemented using role-based access control (RBAC).
       Next.js Frontend              Express Backend
       TypeScript                    Node.js + TypeScript
              │                             │
-             │          REST API           │
-             └─────────────────────────────┘
+             ├────────── REST API ─────────┤
+             │                             │
+             └─────── WebSocket (/ws) ─────┘
                                            │
                     ┌──────────────────────┼──────────────────────┐
                     │                      │                      │
@@ -361,6 +362,7 @@ The backend uses:
 - Node.js
 - TypeScript
 - Express.js
+- ws (Realtime WebSockets)
 - Zod
 - LlamaIndex.TS
 - Supabase PostgreSQL
@@ -445,6 +447,11 @@ backend/
 │   │   └── embeddings/
 │   │       ├── local.ts
 │   │       └── api.ts
+│   │
+│   ├── realtime/
+│   │   ├── events.ts
+│   │   ├── server.ts
+│   │   └── index.ts
 │   │
 │   ├── types/
 │   │
@@ -533,6 +540,16 @@ Store Chunks + Embeddings
 Document READY
 ```
 
+## 12.2 Semantic Retrieval (Phase 1 Implemented & Verified)
+
+Retrieval is implemented using cosine similarity search on PostgreSQL + pgvector, integrated with LlamaIndex.TS:
+
+- **Retriever:** `PGVectorRetriever` extending LlamaIndex's `BaseRetriever` (`src/rag/retrieval/retriever.ts`).
+- **Query Embedding:** Generated using the configured in-process embedding model (`Xenova/jina-embeddings-v2-small-en`, 512 dimensions), ensuring identical vector space alignment with ingestion chunks.
+- **Distance Operator:** PostgreSQL pgvector cosine distance operator (`<=>`), calculating similarity as $1 - \text{cosine\_distance}$.
+- **Filtering & Ordering:** Only documents with status `ready` are searched. Chunks are ordered by cosine distance ascending (highest similarity first) with configurable `topK` (default: 5).
+- **LlamaIndex Compatibility:** Emits native LlamaIndex `NodeWithScore` objects containing `TextNode` instances and score metadata, enabling integration with LlamaIndex query engines in Phase 2.
+
 ---
 
 # 13. Document Processing
@@ -556,6 +573,20 @@ The processing layer is responsible for:
 - Processing status.
 
 For difficult documents such as scanned PDFs, tables, forms, or complex layouts, specialized parsing technology may be evaluated later.
+
+## 13.1 Real-Time Ingestion Lifecycle Events
+
+Document ingestion is asynchronous. To provide real-time progress visibility to connected clients without polling, the ingestion pipeline emits granular lifecycle events over a WebSocket connection:
+
+- `document.processing`: Ingestion has started; document status updated to processing.
+- `document.parsing`: Document layout and text extraction has begun.
+- `document.chunking`: Extracted text is being partitioned into structured chunk nodes.
+- `document.embedding`: Chunk vector embeddings are being computed.
+- `document.ready`: Chunks and embeddings are committed to PostgreSQL + pgvector; document is ready for retrieval.
+- `document.failed`: Ingestion encountered an unrecoverable error; document marked as failed.
+
+**Event Publishing Boundary:**
+The ingestion pipeline does not manage WebSocket sockets or connections directly. Instead, it interacts strictly with an abstracted publishing boundary (`publishIngestionEvent(type, payload)`). This keeps RAG processing isolated from transport-layer details.
 
 ---
 
@@ -851,64 +882,61 @@ The application should retrieve the appropriate prompt from the database/configu
 
 ---
 
-# 21. LLM Architecture
+# 21. LLM Architecture (Phase 1 Implemented & Verified)
 
-The generation layer will support multiple providers.
+The generation layer supports multiple LLM providers through a unified interface with zero external npm wrapper dependencies (native `fetch`):
 
-## 21.1 Gemini
+## 21.1 Groq (Active Default)
 
-Cloud/API-based LLM provider.
+Cloud-based fast inference API provider.
 
-Use cases:
-
-- Answer generation.
-- Potentially embeddings.
-- Other AI functionality where appropriate.
-
----
-
-## 21.2 Groq
-
-Cloud/API-based provider.
-
-Use cases:
-
-- Fast LLM inference.
-- Alternative generation provider.
+- **Endpoint:** `https://api.groq.com/openai/v1/chat/completions`
+- **Default Model:** `qwen/qwen3.8-27b`
+- **Latency:** Sub-second (~350ms inference time).
+- **Configuration:** `GROQ_API_KEY` in environment variables.
 
 ---
 
-## 21.3 Local Llama / Ollama
+## 21.2 Gemini
 
-Local LLM option.
+Cloud/API-based LLM provider from Google.
 
-Use cases:
+- **Endpoint:** `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`
+- **Default Model:** `gemini-flash-latest` (or `gemini-3.8-flash`)
+- **Configuration:** `GEMINI_API_KEY` in environment variables.
 
-- Local development.
-- Offline/private inference where supported.
-- Reducing dependence on external APIs.
+---
+
+## 21.3 Local Ollama
+
+Local open-weights LLM server for offline and development environments.
+
+- **Endpoint:** `http://127.0.0.1:11434/api/chat` (configurable via `OLLAMA_BASE_URL`)
+- **Default Model:** `hf.co/unsloth/Qwen3.5-0.8B-GGUF:Q4_K_M` (configurable via `OLLAMA_MODEL`)
+- **Configuration:** `OLLAMA_BASE_URL` and `OLLAMA_MODEL` in environment variables.
 
 ---
 
 # 22. LLM Provider Abstraction
 
-The application should not hardcode the entire RAG pipeline around one LLM provider.
-
-Conceptually:
+The application decouples generation from model vendors using the `LLMProvider` contract in `src/providers/llm/`:
 
 ```text
-RAG Service
-    ↓
-LLM Interface
-    ↓
- ┌──────────┬──────────┬──────────┐
- ↓          ↓          ↓
-Gemini     Groq     Ollama/Local
+Generation Service (`src/rag/generation/generator.ts`)
+                      ↓
+           LLMProvider (Interface)
+                      ↓
+  ┌───────────────────┼───────────────────┐
+  ↓                   ↓                   ↓
+GroqLLMProvider    GeminiLLMProvider   OllamaLLMProvider
+(Active Default)       (Cloud API)       (Local Server)
 ```
 
-The selected provider should be configurable.
-
-This allows changing the generator without rewriting the complete RAG pipeline.
+- `types.ts`: Defines `LLMProvider` (`generate(prompt, options)`, `providerName`, `modelName`) and `GenerateOptions` (`temperature`, `maxTokens`, `systemPrompt`).
+- `groq.ts`: Implements `GroqLLMProvider` via Groq REST API.
+- `gemini.ts`: Implements `GeminiLLMProvider` via Google Gemini REST API.
+- `ollama.ts`: Implements `OllamaLLMProvider` via local Ollama HTTP API.
+- `index.ts`: Factory function `getLLMProvider(type)` returning the active provider based on environment configuration.
 
 ---
 
@@ -940,71 +968,59 @@ The application keeps embedding-provider-specific logic isolated within `src/pro
 The primary user flow is:
 
 ```text
-User
- ↓
-Question
- ↓
-Backend API
- ↓
-RAG Service
- ↓
-Query Processing
- ↓
-Retrieve Relevant Chunks
- ↓
-Evidence Check
- ↓
-Load Authorized Prompt
- ↓
-Construct LLM Context
- ↓
-Generate Answer
- ↓
-Attach Citations
- ↓
-Return Response
+User Question
+      ↓
+Retrieve Relevant Chunks (`src/rag/retrieval/retriever.ts`)
+      ↓
+Pre-Generation Evidence Sufficiency Check (`src/rag/generation/sufficiency.ts`)
+      │
+      ├─ [Insufficient: top similarity < 0.65 or 0 chunks] ──→ Return Refusal + Reason
+      │
+      ↓ [Sufficient]
+Construct Grounded Context Prompt (`src/rag/generation/prompt.ts`)
+      ↓
+Generate Answer via LLM Provider (`src/providers/llm/`)
+      │
+      ├─ [Model Sentinel: INSUFFICIENT_EVIDENCE] ───────────→ Return Refusal + Reason
+      │
+      ↓ [Model Answered]
+Extract & Map Citations (`src/rag/generation/generator.ts`)
+      ↓
+Return Grounded Answer + Citations
 ```
 
 ---
 
-# 25. Evidence and Hallucination Control
+# 25. Evidence and Hallucination Control (Dual-Layer Architecture)
 
-The system should check whether retrieved information is sufficient before generating a confident answer.
+The system enforces strict groundedness and anti-hallucination guarantees via a **dual-layer evidence sufficiency architecture**:
 
-If evidence is insufficient:
+1. **Layer 1: Pre-Generation Quantitative Gate (`src/rag/generation/sufficiency.ts`)**
+   - Evaluates retrieved chunks before calling the LLM.
+   - If 0 chunks are retrieved or top similarity is below `DEFAULT_MIN_SUFFICIENCY_SCORE` (default: `0.65`), generation is immediately bypassed.
+   - Returns a structured refusal (`evidenceSufficient: false`, reason, and empty citations), saving unnecessary LLM inference latency and token costs.
 
-```text
-Question
-   ↓
-Retrieval
-   ↓
-Insufficient Evidence
-   ↓
-Do NOT invent answer
-   ↓
-Return appropriate response
-```
-
-This is a core RAG quality requirement.
+2. **Layer 2: In-Context Grounding & Refusal Sentinel Gate (`src/rag/generation/prompt.ts` & `generator.ts`)**
+   - The system prompt enforces strict rules: only retrieved evidence may be used, and if facts are insufficient or absent, the model must output `INSUFFICIENT_EVIDENCE: <explanation>`.
+   - The generator inspects the response: if the sentinel is detected, it returns `evidenceSufficient: false` along with the model's specific refusal explanation, preventing hallucination.
+   - If sufficient, the grounded response is accepted and citations are mapped.
 
 ---
 
-# 26. Citations
+# 26. Citations (Phase 1 Implemented & Verified)
 
-Answers should provide source information whenever possible.
+Answers provide verifiable source citations linking directly to the retrieved chunks:
 
-Example conceptual response:
-
-```text
-Answer:
-The document states that ...
-
-Sources:
-- Employee Handbook — Page 12
-- HR Policy — Page 5
-```
-
-Citation format will depend on the final document-processing and retrieval implementation.
+- **Source Reference Formatting:** Evidence is numbered in context as `[Source 1]`, `[Source 2]`, etc., with metadata headers specifying filename, page number, and chunk index.
+- **Citation Extraction:** When the LLM references `[Source X]`, the generator parses the bracketed indices and resolves them to the exact `RetrievedChunk` records.
+- **Citation Payload:** Each citation contains:
+  - `documentId`: ID of the source document in PostgreSQL.
+  - `filename`: Original file name.
+  - `pageNumber`: Page number in the original document (or null for plain text).
+  - `chunkIndex`: Structural chunk index.
+  - `chunkId`: Unique chunk UUID in `document_chunks`.
+  - `similarity`: Cosine similarity score ($1 - \text{cosine\_distance}$).
+  - `snippet`: Content excerpt demonstrating the factual basis.
 
 ---
 
@@ -1137,20 +1153,25 @@ Environment files containing secrets must not be committed to Git.
 
 # 31. Frontend ↔ Backend Communication
 
-The frontend will communicate with the backend through HTTP REST APIs.
+The frontend communicates with the backend primarily through HTTP REST APIs, complemented by a lightweight WebSocket connection for real-time events.
 
 ```text
 Next.js
    │
-   │ HTTP/JSON
-   ↓
-Express API
+   ├─────── HTTP/REST ────────→ Express API (Uploads, document queries, mutations)
    │
-   ↓
-Application Services
+   └─────── WebSocket ────────→ ws://host:port/ws (Live ingestion lifecycle events)
 ```
 
 The frontend should not directly access the backend database for protected application operations.
+
+## 31.1 Real-Time WebSocket Layer
+
+- **Endpoint:** ws://localhost:PORT/ws
+- **Library:** Node.js ws library attached to the underlying Node HTTP server (http.createServer(app)).
+- **Scope:** In Phase 1, the WebSocket connection is dedicated exclusively to streaming background document-ingestion lifecycle events (document.processing through document.ready or document.failed).
+- **Isolation Boundary:** Application services and RAG ingestion pipelines publish events via a decoupled contract (publishIngestionEvent(type, payload)). The ingestion pipeline has no direct knowledge or management of client socket instances or connection state.
+- **Relationship with REST:** Document uploads and queries remain standard HTTP REST operations (POST /api/documents/upload, GET /api/documents). WebSockets provide unidirectional progress streaming for background jobs initiated by REST endpoints.
 
 ---
 
@@ -1173,6 +1194,7 @@ React Compiler
 Node.js
 Express.js
 TypeScript
+ws (Realtime WebSockets)
 Zod
 ```
 
@@ -1547,6 +1569,32 @@ Phase 1 requires a reliable, local, zero-cost, privacy-preserving embedding gene
 
 Impact:
 Implemented in `src/providers/embeddings/local.ts` with singleton pipeline caching. Verified on a real parsed document chunk with confirmed 512-dimensional unit-norm output (~325ms latency). API embeddings (e.g. Gemini) remain an architectural option behind the `EmbeddingProvider` interface.
+```
+
+```text
+Date: 2026-10-08
+
+Decision:
+Initialize a minimal WebSocket communication layer using the `ws` library attached to the Express HTTP server at path `/ws`.
+
+Reason:
+Background document ingestion is asynchronous. Polling REST endpoints causes unnecessary network overhead and latency. WebSockets allow the ingestion pipeline to push live status and progress updates directly to connected clients as stages complete.
+
+Impact:
+Created `backend/src/realtime/` with a typed event contract (`events.ts`) and server manager (`server.ts`). Ingestion pipeline broadcasts 6 lifecycle events (`document.processing`, `document.parsing`, `document.chunking`, `document.embedding`, `document.ready`, `document.failed`) via `publishIngestionEvent()`. Decoupled boundary keeps RAG logic completely independent of network sockets. No changes to frontend or chat streaming in this phase.
+```
+
+```text
+Date: 2026-10-08
+
+Decision:
+Implement the RAG retrieval layer in `src/rag/retrieval/` using cosine similarity (`<=>`) with PostgreSQL + pgvector and LlamaIndex.TS `BaseRetriever`.
+
+Reason:
+Phase 1 requires independent, high-performance semantic retrieval over ingested document chunks without premature LLM chat streaming coupling. Subclassing LlamaIndex's `BaseRetriever` adheres to Section 12 and Section 34.3 while maintaining direct compatibility with our Drizzle ORM pgvector schema.
+
+Impact:
+Created `src/rag/retrieval/` (`types.ts`, `retriever.ts`, `index.ts`). Verified with natural language queries against real document chunks, returning ranked results with cosine similarity scores and complete metadata.
 ```
 
 ---

@@ -1,5 +1,9 @@
 import type { Request, Response } from "express";
-import { processUploadedFiles } from "../services/document.service.js";
+import {
+  processUploadedFiles,
+  getDocuments,
+  getDocumentById,
+} from "../services/document.service.js";
 
 export const uploadDocumentController = async (
   req: Request,
@@ -43,3 +47,46 @@ export const uploadDocumentController = async (
     res.status(500).json({ error: "Failed to upload document" });
   }
 };
+
+export const getDocumentsController = async (
+  _req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const docs = await getDocuments();
+    res.status(200).json({
+      documents: docs,
+    });
+  } catch (error) {
+    console.error("Error in getDocumentsController:", error);
+    res.status(500).json({ error: "Failed to fetch documents" });
+  }
+};
+
+export const getDocumentByIdController = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
+
+  if (!id) {
+    res.status(400).json({ error: "Document ID is required" });
+    return;
+  }
+
+  try {
+    const doc = await getDocumentById(id);
+    if (!doc) {
+      res.status(404).json({ error: "Document not found" });
+      return;
+    }
+    res.status(200).json({
+      document: doc,
+    });
+  } catch (error) {
+    console.error("Error in getDocumentByIdController:", error);
+    res.status(500).json({ error: "Failed to fetch document" });
+  }
+};
+

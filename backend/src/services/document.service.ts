@@ -1,9 +1,10 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
-import { inArray } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { db } from "../database/client.js";
 import { documents, type Document } from "../database/schema.js";
+import { enqueueDocuments } from "../rag/ingestion/index.js";
 
 export interface CreateDocumentInput {
   filename: string;
@@ -22,18 +23,16 @@ export interface ProcessUploadResult {
   skipped: SkippedDocument[];
 }
 
-const computeFileHash = (filePath: string): string => {
-  const buffer = fs.readFileSync(filePath);
+const computeFileHash = async (filePath: string): Promise<string> => {
+  const buffer = await fs.readFile(filePath);
   return crypto.createHash("sha256").update(buffer).digest("hex");
 };
 
-const deleteFile = (filePath: string): void => {
-  if (fs.existsSync(filePath)) {
-    try {
-      fs.unlinkSync(filePath);
-    } catch (err) {
-      console.error(`Failed to delete file ${filePath}:`, err);
-    }
+const deleteFile = async (filePath: string): Promise<void> => {
+  try {
+    await fs.unlink(filePath);
+  } catch (err) {
+    console.error(`Failed to delete file ${filePath}:`, err);
   }
 };
 
@@ -57,10 +56,7 @@ export const uploadDocuments = async (
     .insert(documents)
     .values(
       inputs.map((input) => ({
-        filename: input.filename,
-        fileType: input.fileType,
-        filePath: input.filePath,
-        contentHash: input.contentHash,
+        ...input,
         status: "uploaded",
       }))
     )
@@ -76,9 +72,9 @@ export const processUploadedFiles = async (
 
   // 1. Filter out duplicates within the current batch
   for (const file of files) {
-    const hash = computeFileHash(file.path);
+    const hash = await computeFileHash(file.path);
     if (seenHashesInBatch.has(hash)) {
-      deleteFile(file.path);
+      await deleteFile(file.path);
       skipped.push({
         filename: file.originalname,
         reason: "Duplicate content in batch",
@@ -97,7 +93,7 @@ export const processUploadedFiles = async (
 
   for (const item of uniqueBatchFiles) {
     if (existingHashes.has(item.hash)) {
-      deleteFile(item.file.path);
+      await deleteFile(item.file.path);
       skipped.push({
         filename: item.file.originalname,
         reason: "Duplicate content already exists",
@@ -107,25 +103,46 @@ export const processUploadedFiles = async (
     }
   }
 
-  // 3. Persist valid new files
+  // 3. Persist valid new files and enqueue for background ingestion
   try {
-    const documentInputs = validFilesToInsert.map(({ file, hash }) => ({
-      filename: file.originalname,
-      fileType: path.extname(file.originalname).slice(1).toLowerCase(),
-      filePath: path.relative(process.cwd(), file.path).replace(/\\/g, "/"),
-      contentHash: hash,
-    }));
+    const documentInputs: CreateDocumentInput[] = validFilesToInsert.map(
+      ({ file, hash }) => ({
+        filename: file.originalname,
+        fileType: path.extname(file.originalname).slice(1).toLowerCase(),
+        filePath: path.relative(process.cwd(), file.path).replace(/\\/g, "/"),
+        contentHash: hash,
+      })
+    );
 
     const uploaded = await uploadDocuments(documentInputs);
+
+    if (uploaded.length > 0) {
+      enqueueDocuments(uploaded.map((doc) => doc.id));
+    }
 
     return {
       uploaded,
       skipped,
     };
   } catch (error) {
-    for (const item of validFilesToInsert) {
-      deleteFile(item.file.path);
-    }
+    await Promise.all(validFilesToInsert.map((item) => deleteFile(item.file.path)));
     throw error;
   }
+};
+
+export const getDocuments = async (): Promise<Document[]> => {
+  return await db
+    .select()
+    .from(documents)
+    .orderBy(desc(documents.createdAt));
+};
+
+export const getDocumentById = async (id: string): Promise<Document | null> => {
+  const [found] = await db
+    .select()
+    .from(documents)
+    .where(eq(documents.id, id))
+    .limit(1);
+
+  return found ?? null;
 };

@@ -1,7 +1,8 @@
 import { pipeline, type FeatureExtractionPipeline } from "@xenova/transformers";
+import { EMBEDDING_MODEL } from "../../config/env.js";
 import type { EmbeddingProvider } from "./types.js";
 
-export const LOCAL_EMBEDDING_MODEL = "Xenova/jina-embeddings-v2-small-en";
+export const LOCAL_EMBEDDING_MODEL = EMBEDDING_MODEL;
 export const LOCAL_EMBEDDING_DIMENSIONS = 512;
 
 let pipelinePromise: Promise<FeatureExtractionPipeline> | null = null;

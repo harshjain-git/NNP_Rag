@@ -16,11 +16,12 @@ export interface ChunkOptions {
   fallbackChunkSize?: number;
   fallbackOverlap?: number;
 }
-
-const DEFAULT_STRUCTURAL_TARGET = 1000;
-const DEFAULT_STRUCTURAL_MAX = 1200;
-const DEFAULT_FALLBACK_CHUNK_SIZE = 1000;
-const DEFAULT_FALLBACK_OVERLAP = 120;
+import {
+  DEFAULT_STRUCTURAL_TARGET,
+  DEFAULT_STRUCTURAL_MAX,
+  DEFAULT_FALLBACK_CHUNK_SIZE,
+  DEFAULT_FALLBACK_OVERLAP,
+} from "../../config/rag.js";
 
 /**
  * Document chunking layer using LlamaIndex.TS.
