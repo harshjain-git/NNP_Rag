@@ -15,12 +15,14 @@ export interface ChunkOptions {
   structuralMax?: number;
   fallbackChunkSize?: number;
   fallbackOverlap?: number;
+  minChunkChars?: number;
 }
 import {
   DEFAULT_STRUCTURAL_TARGET,
   DEFAULT_STRUCTURAL_MAX,
   DEFAULT_FALLBACK_CHUNK_SIZE,
   DEFAULT_FALLBACK_OVERLAP,
+  DEFAULT_MIN_CHUNK_CHARS,
 } from "../../config/rag.js";
 
 /**
@@ -30,6 +32,8 @@ import {
  *    Keeps reasonably sized sections (headings, tables, lists) intact.
  * 2. Fallback: Recursive sentence-aware splitting via SentenceSplitter
  *    only when a structural section exceeds the maximum token limit.
+ * 3. Micro-chunk merging: Prevents isolated page headers from becoming
+ *    standalone vector chunks by prepending them to the next section.
  */
 export const chunkDocument = (
   input: ParseResult | ParsedPage[],
@@ -50,6 +54,7 @@ export const chunkDocument = (
   const structuralMax = options?.structuralMax ?? DEFAULT_STRUCTURAL_MAX;
   const fallbackChunkSize = options?.fallbackChunkSize ?? DEFAULT_FALLBACK_CHUNK_SIZE;
   const fallbackOverlap = options?.fallbackOverlap ?? DEFAULT_FALLBACK_OVERLAP;
+  const minChunkChars = options?.minChunkChars ?? DEFAULT_MIN_CHUNK_CHARS;
 
   const markdownParser = new MarkdownNodeParser();
   const fallbackSplitter = new SentenceSplitter({
@@ -79,7 +84,7 @@ export const chunkDocument = (
   // 1. Primary pass: structural splitting based on markdown headers
   const structuralNodes = markdownParser.getNodesFromDocuments(documents);
 
-  const chunks: IngestionChunk[] = [];
+  const rawChunks: IngestionChunk[] = [];
 
   // 2. Evaluate each structural node against token limits
   for (const node of structuralNodes) {
@@ -91,13 +96,13 @@ export const chunkDocument = (
 
     if (tokenCount <= structuralMax) {
       // Reasonably sized structural section: keep intact
-      chunks.push({
+      rawChunks.push({
         content,
         pageNumber:
           typeof node.metadata.pageNumber === "number"
             ? node.metadata.pageNumber
             : undefined,
-        chunkIndex: chunks.length,
+        chunkIndex: rawChunks.length,
         metadata: {
           ...node.metadata,
           tokenCount,
@@ -111,13 +116,13 @@ export const chunkDocument = (
         const subContent = subNode.getContent(MetadataMode.NONE).trim();
         if (!subContent) continue;
 
-        chunks.push({
+        rawChunks.push({
           content: subContent,
           pageNumber:
             typeof subNode.metadata.pageNumber === "number"
               ? subNode.metadata.pageNumber
               : undefined,
-          chunkIndex: chunks.length,
+          chunkIndex: rawChunks.length,
           metadata: {
             ...subNode.metadata,
             tokenCount: fallbackSplitter.tokenSize(subContent),
@@ -128,5 +133,42 @@ export const chunkDocument = (
     }
   }
 
-  return chunks;
+  // 4. Merge micro-chunks (such as isolated page headers) into adjacent content
+  if (rawChunks.length <= 1) {
+    return rawChunks;
+  }
+
+  const mergedChunks: IngestionChunk[] = [];
+  let pendingPrefix = "";
+
+  for (let i = 0; i < rawChunks.length; i++) {
+    const current = rawChunks[i]!;
+    if (pendingPrefix) {
+      current.content = `${pendingPrefix}\n\n${current.content}`;
+      pendingPrefix = "";
+    }
+
+    if (current.content.length < minChunkChars && i < rawChunks.length - 1) {
+      pendingPrefix = current.content;
+      continue;
+    }
+
+    current.chunkIndex = mergedChunks.length;
+    mergedChunks.push(current);
+  }
+
+  if (pendingPrefix) {
+    if (mergedChunks.length > 0) {
+      const last = mergedChunks[mergedChunks.length - 1]!;
+      last.content = `${last.content}\n\n${pendingPrefix}`;
+    } else {
+      mergedChunks.push({
+        content: pendingPrefix,
+        chunkIndex: 0,
+        metadata: { splitMethod: "single" },
+      });
+    }
+  }
+
+  return mergedChunks;
 };

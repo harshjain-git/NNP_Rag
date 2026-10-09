@@ -10,6 +10,8 @@ export const DEFAULT_FALLBACK_CHUNK_SIZE = 1000;
 export const DEFAULT_FALLBACK_OVERLAP = 120;
 export const DEFAULT_RETRIEVAL_TOP_K = 5;
 export const DEFAULT_MIN_SUFFICIENCY_SCORE = 0.65;
+export const DEFAULT_MIN_SIMILARITY = 0.5;
+export const DEFAULT_MIN_CHUNK_CHARS = 300;
 export const DEFAULT_INSUFFICIENT_EVIDENCE_MESSAGE =
   "I cannot answer this question based on the provided documents because there is insufficient relevant information available.";
 

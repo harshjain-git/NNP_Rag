@@ -5,6 +5,13 @@ import "dotenv/config";
 // ============================================================================
 const PORT = Number(process.env.PORT) || 3000;
 
+// Allowed frontend origins for CORS (comma-separated string or default array)
+const CORS_ORIGIN: string[] = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(",")
+      .map((origin) => origin.trim())
+      .filter((origin) => origin.length > 0)
+  : ["http://localhost:3000", "http://localhost:3001"];
+
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) {
   throw new Error("DATABASE_URL is not defined in environment variables");
@@ -62,8 +69,8 @@ const OLLAMA_MODEL =
 // ----------------------------------------------------------------------------
 // 1. Which provider is active? (Options: "groq" | "gemini" | "ollama")
 // Defaults to "groq" if GROQ_API_KEY is set, otherwise "gemini".
-const LLM_PROVIDER = process.env.LLM_PROVIDER || "ollama";
-
+const DEFAULT_LLM_PROVIDER = "ollama";
+const LLM_PROVIDER = process.env.LLM_PROVIDER || DEFAULT_LLM_PROVIDER;
 
 // 2. Which model is active?
 // Automatically matches the chosen active provider above.
@@ -94,11 +101,40 @@ const INGESTION_CONCURRENCY = Math.max(
   Number(process.env.INGESTION_CONCURRENCY) || 3
 );
 
+// ============================================================================
+// 6. Authentication & JWT Configuration
+// ============================================================================
+const NODE_ENV = process.env.NODE_ENV || "development";
+
+/**
+ * Validates JWT_SECRET according to environment security requirements.
+ * In production, JWT_SECRET is strictly required and cannot be empty.
+ * No insecure fallback secret is provided in any environment.
+ */
+export const validateJwtSecret = (
+  secret?: string,
+  nodeEnv: string = NODE_ENV
+): string => {
+  if (nodeEnv === "production" && (!secret || secret.trim().length === 0)) {
+    throw new Error("JWT_SECRET is not defined in environment variables for production");
+  }
+  return secret || "";
+};
+
+const JWT_SECRET = validateJwtSecret(process.env.JWT_SECRET, NODE_ENV);
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
+
 export {
-  // Server & Database
+  // Server & Environment
   PORT,
+  NODE_ENV,
+  CORS_ORIGIN,
   DATABASE_URL,
   LLAMAPARSE_API_KEY,
+
+  // Authentication & JWT Configuration
+  JWT_SECRET,
+  JWT_EXPIRES_IN,
 
   // Text Embedding (Vector Search & Retrieval)
   EMBEDDING_PROVIDER,

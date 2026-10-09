@@ -9,6 +9,59 @@ import {
   index,
 } from "drizzle-orm/pg-core";
 
+// ============================================================================
+// 1. Roles & Users (Authentication & RBAC Foundation)
+// ============================================================================
+
+export const ROLE_NAMES = {
+  USER: "USER",
+  ADMIN: "ADMIN",
+  SUPER_ADMIN: "SUPER_ADMIN",
+} as const;
+
+export type RoleName = (typeof ROLE_NAMES)[keyof typeof ROLE_NAMES];
+
+export const roles = pgTable("roles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull().unique(), // 'USER' | 'ADMIN' | 'SUPER_ADMIN'
+  description: text("description"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const users = pgTable(
+  "users",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    passwordHash: text("password_hash").notNull(),
+    roleId: uuid("role_id")
+      .notNull()
+      .references(() => roles.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("idx_users_email").on(table.email),
+    index("idx_users_role_id").on(table.roleId),
+  ]
+);
+
+export type Role = typeof roles.$inferSelect;
+export type NewRole = typeof roles.$inferInsert;
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+
+// ============================================================================
+// 2. Documents & Chunks (RAG Storage & pgvector Embeddings)
+// ============================================================================
+
 export const documents = pgTable("documents", {
   id: uuid("id").primaryKey().defaultRandom(),
   filename: text("filename").notNull(),

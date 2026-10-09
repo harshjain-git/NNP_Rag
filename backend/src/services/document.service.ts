@@ -31,8 +31,10 @@ const computeFileHash = async (filePath: string): Promise<string> => {
 const deleteFile = async (filePath: string): Promise<void> => {
   try {
     await fs.unlink(filePath);
-  } catch (err) {
-    console.error(`Failed to delete file ${filePath}:`, err);
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.error(`Failed to delete file ${filePath}:`, err);
+    }
   }
 };
 
@@ -145,4 +147,24 @@ export const getDocumentById = async (id: string): Promise<Document | null> => {
     .limit(1);
 
   return found ?? null;
+};
+
+export const deleteDocument = async (id: string): Promise<Document | null> => {
+  const document = await getDocumentById(id);
+  if (!document) {
+    return null;
+  }
+
+  // Delete from database (foreign key ON DELETE CASCADE removes associated document_chunks)
+  await db.delete(documents).where(eq(documents.id, id));
+
+  // Safely remove associated uploaded file from filesystem using stored filePath
+  if (document.filePath) {
+    const absolutePath = path.isAbsolute(document.filePath)
+      ? document.filePath
+      : path.resolve(process.cwd(), document.filePath);
+    await deleteFile(absolutePath);
+  }
+
+  return document;
 };

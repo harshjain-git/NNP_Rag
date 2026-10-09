@@ -28,9 +28,11 @@ export class OllamaLLMProvider implements LLMProvider {
         model: this.modelName,
         messages,
         stream: false,
+        think: false,
         options: {
           temperature: options?.temperature ?? 0.1,
           num_predict: options?.maxTokens ?? 1024,
+          repeat_penalty: 1.15,
         },
       }),
     });
@@ -44,8 +46,12 @@ export class OllamaLLMProvider implements LLMProvider {
       message?: { content?: string; thinking?: string };
     };
 
-    const content =
-      data.message?.content?.trim() || data.message?.thinking?.trim();
+    // Extract only the final response content (never fall back to thinking tokens)
+    let content = data.message?.content?.trim() || "";
+
+    // Strip any lingering reasoning blocks (e.g. <think>...</think>) if present
+    content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+
     if (!content) {
       throw new Error("Ollama API returned an empty or invalid response");
     }

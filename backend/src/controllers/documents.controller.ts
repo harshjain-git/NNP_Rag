@@ -3,7 +3,12 @@ import {
   processUploadedFiles,
   getDocuments,
   getDocumentById,
+  deleteDocument,
 } from "../services/document.service.js";
+
+// Standard UUID format validator (8-4-4-4-12 hexadecimal string)
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const uploadDocumentController = async (
   req: Request,
@@ -70,13 +75,15 @@ export const getDocumentByIdController = async (
   const rawId = req.params.id;
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
 
-  if (!id) {
-    res.status(400).json({ error: "Document ID is required" });
+  if (!id || typeof id !== "string" || !UUID_REGEX.test(id.trim())) {
+    res.status(400).json({
+      error: "Invalid document ID format. Expected a valid UUID",
+    });
     return;
   }
 
   try {
-    const doc = await getDocumentById(id);
+    const doc = await getDocumentById(id.trim());
     if (!doc) {
       res.status(404).json({ error: "Document not found" });
       return;
@@ -87,6 +94,38 @@ export const getDocumentByIdController = async (
   } catch (error) {
     console.error("Error in getDocumentByIdController:", error);
     res.status(500).json({ error: "Failed to fetch document" });
+  }
+};
+
+export const deleteDocumentController = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
+
+  if (!id || typeof id !== "string" || !UUID_REGEX.test(id.trim())) {
+    res.status(400).json({
+      error: "Invalid document ID format. Expected a valid UUID",
+    });
+    return;
+  }
+
+  try {
+    const deleted = await deleteDocument(id.trim());
+    if (!deleted) {
+      res.status(404).json({ error: "Document not found" });
+      return;
+    }
+
+    res.status(200).json({
+      message: "Document deleted successfully",
+      documentId: deleted.id,
+      filename: deleted.filename,
+    });
+  } catch (error) {
+    console.error("Error in deleteDocumentController:", error);
+    res.status(500).json({ error: "Failed to delete document" });
   }
 };
 

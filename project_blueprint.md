@@ -1,1724 +1,639 @@
 # NNT RAG — Project Blueprint
 
-> **Project Status:** Phase 1 — Foundation & Document Q&A
-> **Document Purpose:** This document is the source of truth for the NNT RAG project's purpose, architecture, technology choices, scope, and major technical decisions.
->
-> Any major architectural or technology decision made during development should be reflected in this document.
+> **Project Status:** Phase 1 — Foundation & Document Q&A  
+> **Source of Truth:** Authoritative architectural specification, technology selections, data contracts, and scope boundaries for NNT RAG. All implementations, modifications, and AI agent contributions must strictly conform to this document.
 
 ---
 
-# 1. Project Overview
+# 1. Project Overview and Core Principles
 
-## 1.1 Project Name
+**NNT RAG** is a production-oriented document question-answering system built on Retrieval-Augmented Generation (RAG). The system enables authorized administrators to ingest multi-format documents and configure system prompts, allowing authenticated users to query document knowledge and receive grounded answers supported by verifiable citations.
 
-**NNT RAG**
+### 1.1 Core RAG Principle
+> **The system answers questions strictly and exclusively using authorized knowledge from uploaded documents and administrator-managed prompts.**
 
-NNT RAG is a production-oriented document question-answering system based on Retrieval-Augmented Generation (RAG).
-
-The system allows authorized administrators to upload documents and manage prompts. Users can then ask questions and receive answers generated from the available document knowledge.
-
----
-
-# 2. Project Purpose
-
-The primary purpose of NNT RAG is to build a structured, production-style RAG application where users can:
-
-- Ask questions about uploaded documents.
-- Retrieve relevant information from those documents.
-- Receive answers generated using an LLM.
-- See supporting document information/citations.
-- Maintain conversations.
-
-Administrators can:
-
-- Upload documents.
-- Process and manage documents.
-- Manage prompts used by the RAG system.
-- Control the knowledge available to users.
-
-Super Administrators can additionally manage higher-level system configuration and administration.
-
----
-
-# 3. Core RAG Principle
-
-The most important rule of the system is:
-
-> **The system should answer questions using only the authorized knowledge available through uploaded documents and administrator-managed prompts.**
-
-The application should not intentionally use arbitrary external knowledge to answer document-related questions.
-
-If sufficient evidence cannot be found in the available documents, the system should not invent an answer.
-
-Expected behavior:
+The application enforces strict grounding safeguards to minimize hallucination risks by constraining model responses to retrieved evidence. If sufficient evidence cannot be found within the authorized document chunks, the system is designed to explicitly refuse to answer and provide a clear explanation.
 
 ```text
 User Question
       ↓
-Retrieve relevant document content
+Semantic Retrieval (PostgreSQL pgvector)
       ↓
-Check whether sufficient evidence exists
-      ↓
- ┌───────────────┐
- │ Evidence      │
- │ sufficient?   │
- └───────┬───────┘
-         │
-     ┌───┴───┐
-     │       │
-    YES      NO
-     │       │
-     ↓       ↓
- Generate   Refuse / explain
- Answer     insufficient evidence
-     │
-     ↓
- Answer + Citations
-```
-
----
-
-# 4. Phase 1 Scope
-
-## 4.1 Included
-
-Phase 1 focuses on:
-
-- User authentication and roles.
-- Document upload.
-- Document processing.
-- Document storage.
-- Document chunking.
-- Embedding generation.
-- Vector storage.
-- Semantic retrieval.
-- Evidence checking.
-- LLM-based answer generation.
-- Prompt management.
-- Conversations.
-- Messages/chat history.
-- Citations/source information.
-- Basic administration.
-- Multiple LLM provider support.
-- Local and API-based embedding support.
-
-## 4.2 Initially Supported Documents
-
-The initial document formats are:
-
-- PDF
-- TXT
-- DOCX
-
-Document processing flow:
-
-```text
-Upload
-   ↓
-Process
-   ↓
-Chunk
-   ↓
-Embed
-   ↓
-Store
-   ↓
-Ready
-```
-
-Possible processing states:
-
-```text
-UPLOADED
-PROCESSING
-READY
-FAILED
-```
-
-## 4.3 Not Part of Initial Phase
-
-The following are intentionally not required for the initial implementation:
-
-- Microservices architecture.
-- Kubernetes.
-- Kafka.
-- Redis.
-- Separate vector database.
-- Complex distributed processing.
-- Large-scale cloud document processing.
-- Real-time collaborative editing.
-- Advanced analytics.
-- Enterprise SSO.
-- Complex multi-tenant infrastructure.
-
-These may be considered later if the product requires them.
-
----
-
-# 5. Users and Roles
-
-The system has three primary roles.
-
-## 5.1 User
-
-A normal application user.
-
-Responsibilities:
-
-- Log in.
-- View available documents/knowledge according to permissions.
-- Ask questions.
-- View generated answers.
-- View citations.
-- Create/view conversations.
-- Continue previous conversations.
-
-Users should not be able to modify system documents or prompts unless explicitly permitted by future requirements.
-
----
-
-## 5.2 Admin
-
-An administrator manages application knowledge.
-
-Responsibilities may include:
-
-- Upload documents.
-- View uploaded documents.
-- Process documents.
-- Delete/manage documents.
-- View document processing status.
-- Create/update/manage prompts.
-- Manage users within allowed administrative scope.
-- Monitor basic system behavior.
-
----
-
-## 5.3 Super Admin
-
-The highest administrative role.
-
-Responsibilities may include:
-
-- Manage administrators.
-- Manage users.
-- Manage system-level settings.
-- Manage global prompts.
-- Configure available LLM providers.
-- Configure embedding providers.
-- Manage system-wide application configuration.
-- Perform higher-level administrative operations.
-
-Exact permissions will be implemented using role-based access control (RBAC).
-
----
-
-# 6. High-Level System Architecture
-
-```text
-                         NNT RAG
-                            │
-             ┌──────────────┴──────────────┐
-             │                             │
-             ↓                             ↓
-      Next.js Frontend              Express Backend
-      TypeScript                    Node.js + TypeScript
-             │                             │
-             ├────────── REST API ─────────┤
-             │                             │
-             └─────── WebSocket (/ws) ─────┘
-                                           │
-                    ┌──────────────────────┼──────────────────────┐
-                    │                      │                      │
-                    ↓                      ↓                      ↓
-                  Auth              Document Management       Chat/RAG
-                    │                      │                      │
-                    │                      ↓                      ↓
-                    │                Document Processing     LlamaIndex.TS
-                    │                                             │
-                    │                                             ↓
-                    │                                    Retrieval / RAG
-                    │                                             │
-                    └──────────────────────┬──────────────────────┘
-                                           │
-                                           ↓
-                                Supabase PostgreSQL
-                                           │
-                                  PostgreSQL + pgvector
-                                           │
-                         ┌─────────────────┴─────────────────┐
-                         ↓                                   ↓
-                    Relational Data                     Vector Data
-                         │                                   │
-                         ↓                                   ↓
-                    Documents                         Document Embeddings
-                    Users                              Chunk Embeddings
-                    Prompts
-                    Conversations
-                    Messages
-
-                                           │
-                                           ↓
-                                  LLM / Embedding Layer
-                                           │
-                     ┌─────────────────────┼─────────────────────┐
-                     ↓                     ↓                     ↓
-                  Gemini                 Groq             Local Llama/Ollama
-```
-
----
-
-# 7. Frontend Architecture
-
-## 7.1 Technology
-
-The frontend uses:
-
-- Next.js
-- React
-- TypeScript
-- App Router
-- Tailwind CSS
-- ESLint
-- React Compiler
-
-The frontend is an independent application from the backend.
-
-Location:
-
-```text
-NNT_Rag/frontend/
-```
-
----
-
-# 8. Frontend Folder Structure
-
-The following is the planned application structure.
-
-```text
-frontend/
-│
-├── public/
-│
-├── src/
-│   │
-│   ├── app/
-│   │   ├── layout.tsx
-│   │   ├── page.tsx
-│   │   │
-│   │   ├── login/
-│   │   │   └── page.tsx
-│   │   │
-│   │   ├── chat/
-│   │   │   └── page.tsx
-│   │   │
-│   │   ├── documents/
-│   │   │   └── page.tsx
-│   │   │
-│   │   ├── admin/
-│   │   │   └── ...
-│   │   │
-│   │   └── super-admin/
-│   │       └── ...
-│   │
-│   ├── components/
-│   │   ├── ui/
-│   │   ├── chat/
-│   │   ├── documents/
-│   │   └── admin/
-│   │
-│   ├── lib/
-│   │   ├── api/
-│   │   ├── auth/
-│   │   └── utils/
-│   │
-│   ├── hooks/
-│   │
-│   ├── types/
-│   │
-│   └── ...
-│
-├── package.json
-├── tsconfig.json
-├── next.config.ts
-├── eslint.config.mjs
-├── postcss.config.mjs
-└── AGENTS.md
-```
-
-This structure is an **application-level design**, not a claim that Next.js requires these exact folders.
-
-Next.js provides the routing/application framework; our project determines how components, API clients, hooks, and other application code are organized.
-
----
-
-# 9. Backend Architecture
-
-## 9.1 Technology
-
-The backend uses:
-
-- Node.js
-- TypeScript
-- Express.js
-- ws (Realtime WebSockets)
-- Zod
-- LlamaIndex.TS
-- Supabase PostgreSQL
-- pgvector
-
-The backend is an independent application.
-
-Location:
-
-```text
-NNT_Rag/backend/
-```
-
----
-
-# 10. Backend Folder Structure
-
-Planned structure:
-
-```text
-backend/
-│
-├── src/
-│   │
-│   ├── server.ts
-│   │
-│   ├── app.ts
-│   │
-│   ├── config/
-│   │   ├── env.ts
-│   │   └── ...
-│   │
-│   ├── routes/
-│   │   ├── auth.routes.ts
-│   │   ├── users.routes.ts
-│   │   ├── documents.routes.ts
-│   │   ├── prompts.routes.ts
-│   │   ├── conversations.routes.ts
-│   │   └── chat.routes.ts
-│   │
-│   ├── controllers/
-│   │   ├── auth.controller.ts
-│   │   ├── documents.controller.ts
-│   │   ├── prompts.controller.ts
-│   │   ├── conversations.controller.ts
-│   │   └── chat.controller.ts
-│   │
-│   ├── services/
-│   │   ├── auth.service.ts
-│   │   ├── document.service.ts
-│   │   ├── prompt.service.ts
-│   │   ├── conversation.service.ts
-│   │   └── rag.service.ts
-│   │
-│   ├── middleware/
-│   │   ├── auth.middleware.ts
-│   │   ├── role.middleware.ts
-│   │   └── error.middleware.ts
-│   │
-│   ├── validators/
-│   │   ├── auth.schema.ts
-│   │   ├── document.schema.ts
-│   │   ├── prompt.schema.ts
-│   │   └── chat.schema.ts
-│   │
-│   ├── database/
-│   │   ├── client.ts
-│   │   └── ...
-│   │
-│   ├── rag/
-│   │   ├── ingestion/
-│   │   ├── retrieval/
-│   │   ├── generation/
-│   │   └── ...
-│   │
-│   ├── providers/
-│   │   ├── llm/
-│   │   │   ├── gemini.ts
-│   │   │   ├── groq.ts
-│   │   │   └── ollama.ts
-│   │   │
-│   │   └── embeddings/
-│   │       ├── local.ts
-│   │       └── api.ts
-│   │
-│   ├── realtime/
-│   │   ├── events.ts
-│   │   ├── server.ts
-│   │   └── index.ts
-│   │
-│   ├── types/
-│   │
-│   └── utils/
-│
-├── package.json
-├── package-lock.json
-└── tsconfig.json
-```
-
-This is our **planned application architecture**.
-
-Express itself does not require this exact folder structure. The structure separates responsibilities so the application remains maintainable as it grows.
-
----
-
-# 11. Backend Request Flow
-
-The backend follows a general separation of responsibilities:
-
-```text
-HTTP Request
-     ↓
-Route
-     ↓
-Middleware
-     ↓
-Controller
-     ↓
-Service
-     ↓
-Database / RAG / Provider
-     ↓
-Controller
-     ↓
-HTTP Response
-```
-
-Example:
-
-```text
-POST /api/chat
-       ↓
-chat.routes.ts
-       ↓
-auth.middleware.ts
-       ↓
-chat.controller.ts
-       ↓
-rag.service.ts
-       ↓
-LlamaIndex.TS
-       ↓
-pgvector retrieval
-       ↓
-LLM
-       ↓
-Answer + citations
-```
-
----
-
-# 12. RAG Architecture
-
-LlamaIndex.TS is the selected RAG framework.
-
-The application should use LlamaIndex's RAG building blocks instead of unnecessarily implementing retrieval and indexing logic from scratch.
-
-## 12.1 Document Ingestion
-
-```text
-Document Upload
-      ↓
-Validate File
-      ↓
-Store Original File
-      ↓
-Extract Text
-      ↓
-Create Document Nodes/Chunks
-      ↓
-Generate Embeddings
-      ↓
-Store Chunks + Embeddings
-      ↓
-Document READY
-```
-
-## 12.2 Semantic Retrieval (Phase 1 Implemented & Verified)
-
-Retrieval is implemented using cosine similarity search on PostgreSQL + pgvector, integrated with LlamaIndex.TS:
-
-- **Retriever:** `PGVectorRetriever` extending LlamaIndex's `BaseRetriever` (`src/rag/retrieval/retriever.ts`).
-- **Query Embedding:** Generated using the configured in-process embedding model (`Xenova/jina-embeddings-v2-small-en`, 512 dimensions), ensuring identical vector space alignment with ingestion chunks.
-- **Distance Operator:** PostgreSQL pgvector cosine distance operator (`<=>`), calculating similarity as $1 - \text{cosine\_distance}$.
-- **Filtering & Ordering:** Only documents with status `ready` are searched. Chunks are ordered by cosine distance ascending (highest similarity first) with configurable `topK` (default: 5).
-- **LlamaIndex Compatibility:** Emits native LlamaIndex `NodeWithScore` objects containing `TextNode` instances and score metadata, enabling integration with LlamaIndex query engines in Phase 2.
-
----
-
-# 13. Document Processing
-
-Initial supported formats:
-
-```text
-PDF
-TXT
-DOCX
-```
-
-The processing layer is responsible for:
-
-- File validation.
-- Text extraction.
-- Metadata extraction where available.
-- Chunking.
-- Embedding generation.
-- Vector storage.
-- Processing status.
-
-For difficult documents such as scanned PDFs, tables, forms, or complex layouts, specialized parsing technology may be evaluated later.
-
-## 13.1 Real-Time Ingestion Lifecycle Events
-
-Document ingestion is asynchronous. To provide real-time progress visibility to connected clients without polling, the ingestion pipeline emits granular lifecycle events over a WebSocket connection:
-
-- `document.processing`: Ingestion has started; document status updated to processing.
-- `document.parsing`: Document layout and text extraction has begun.
-- `document.chunking`: Extracted text is being partitioned into structured chunk nodes.
-- `document.embedding`: Chunk vector embeddings are being computed.
-- `document.ready`: Chunks and embeddings are committed to PostgreSQL + pgvector; document is ready for retrieval.
-- `document.failed`: Ingestion encountered an unrecoverable error; document marked as failed.
-
-**Event Publishing Boundary:**
-The ingestion pipeline does not manage WebSocket sockets or connections directly. Instead, it interacts strictly with an abstracted publishing boundary (`publishIngestionEvent(type, payload)`). This keeps RAG processing isolated from transport-layer details.
-
----
-
-# 14. Document Storage
-
-For Phase 1:
-
-> **Local filesystem storage** will be used for original uploaded documents.
-
-Conceptually:
-
-```text
-uploads/
-├── document-1.pdf
-├── document-2.txt
-└── document-3.docx
-```
-
-The database stores document metadata and processing information.
-
-Future versions may move original file storage to object storage such as Supabase Storage or another cloud storage provider.
-
----
-
-# 15. Chunking
-
-Documents will be divided into smaller chunks before embedding.
-
-Conceptually:
-
-```text
-Document
-    ↓
-Text
-    ↓
-Chunks
-    ↓
-Embeddings
-    ↓
-Vector Database
-```
-
-Each chunk should retain useful metadata such as:
-
-- Document ID.
-- Chunk ID.
-- Chunk index.
-- Page number where applicable.
-- Source information.
-- Additional metadata.
-
-Exact chunk size and overlap will be evaluated during RAG quality testing rather than permanently hardcoded as an architectural decision.
-
----
-
-# 16. Embedding Architecture
-
-The application supports a modular embedding architecture with provider abstraction.
-
-## 16.1 Local Embeddings (Phase 1 Implemented & Verified)
-
-The primary embedding solution for Phase 1 is a local model running in-process via Transformers.js:
-
-- **Model:** `Xenova/jina-embeddings-v2-small-en`
-- **Runtime:** Transformers.js via `@xenova/transformers`
-- **Vector Dimension:** `512` (matches `vector(512)` in Supabase PostgreSQL pgvector)
-- **Pooling Strategy:** Mean pooling (`pooling: "mean"`)
-- **Normalization:** L2 normalization (`normalize: true`), ensuring unit-norm vectors for exact cosine similarity search
-- **Provider Implementation:** `LocalEmbeddingProvider` in `src/providers/embeddings/local.ts` with reusable singleton pipeline caching to avoid per-chunk model re-initialization
-- **Verification:** Verified in Node.js on real document chunks with confirmed 512-dimensional float outputs and unit norm (~1.0000)
-
-Advantages:
-
-- No external API dependency or rate limits.
-- Zero per-token inference cost.
-- Complete data privacy (documents never leave the local backend during embedding).
-- Consistent vector space between document chunks and user query embeddings.
-
----
-
-## 16.2 API Embeddings (Configurable Future Option)
-
-An API-based embedding provider remains supported in the architecture as a future/configurable option:
-
-- **Candidate:** Google Gemini embeddings.
-- **Role:** Alternative or high-throughput cloud provider option.
-- **Integration:** Plugs into the same `EmbeddingProvider` interface without altering ingestion or retrieval logic.
-- The embedding provider should be configurable rather than tightly coupled to the RAG implementation.
-
----
-
-# 17. Vector Database
-
-The selected vector storage solution is:
-
-> **PostgreSQL + pgvector through Supabase**
-
-The database provides both:
-
-```text
-Relational data
-+
-Vector similarity search
-```
-
-This avoids introducing a separate vector database during Phase 1.
-
----
-
-# 18. Supabase Database
-
-Supabase is being used as the hosted PostgreSQL database platform.
-
-Current database setup:
-
-```text
-Supabase
-   ↓
-PostgreSQL
-   ↓
-pgvector extension
-```
-
-The `vector` PostgreSQL extension has been enabled.
-
-Current verified pgvector version:
-
-```text
-0.8.2
-```
-
-The exact embedding vector dimension will be decided before creating the final `document_chunks.embedding` column.
-
----
-
-# 19. Planned Database Schema
-
-Initial planned entities:
-
-```text
-users
-roles
-documents
-document_chunks
-prompts
-conversations
-messages
-```
-
-## 19.1 Roles
-
-Stores application roles and permissions.
-
-Example roles:
-
-```text
-USER
-ADMIN
-SUPER_ADMIN
-```
-
----
-
-## 19.2 Users
-
-Stores application user information.
-
-Potential fields:
-
-```text
-id
-name
-email
-password/auth reference
-role_id
-created_at
-updated_at
-```
-
-Exact authentication implementation will be finalized during the authentication phase.
-
----
-
-## 19.3 Documents
-
-Stores uploaded document metadata.
-
-Potential fields:
-
-```text
-id
-filename
-file_type
-file_path
-status
-uploaded_by
-created_at
-updated_at
-```
-
----
-
-## 19.4 Document Chunks
-
-Stores processed document chunks and their embeddings.
-
-Potential fields:
-
-```text
-id
-document_id
-content
-page_number
-chunk_index
-embedding
-metadata
-created_at
-```
-
-The exact vector dimension depends on the selected embedding model.
-
----
-
-## 19.5 Prompts
-
-Stores administrator-managed prompts.
-
-Potential fields:
-
-```text
-id
-name
-content
-type
-status
-created_by
-created_at
-updated_at
-```
-
-Prompt versioning may be introduced if required.
-
----
-
-## 19.6 Conversations
-
-Stores user conversations.
-
-Potential fields:
-
-```text
-id
-user_id
-title
-created_at
-updated_at
-```
-
----
-
-## 19.7 Messages
-
-Stores messages belonging to conversations.
-
-Potential fields:
-
-```text
-id
-conversation_id
-role
-content
-citations
-created_at
-```
-
----
-
-# 20. Prompt Management
-
-Prompts are treated as application-managed data rather than hardcoded application behavior.
-
-Authorized administrators can manage prompts.
-
-Possible prompt categories include:
-
-- System instructions.
-- RAG answer instructions.
-- Citation instructions.
-- Role-specific prompts.
-- Future specialized prompts.
-
-The application should retrieve the appropriate prompt from the database/configuration layer when generating an answer.
-
----
-
-# 21. LLM Architecture (Phase 1 Implemented & Verified)
-
-The generation layer supports multiple LLM providers through a unified interface with zero external npm wrapper dependencies (native `fetch`):
-
-## 21.1 Groq (Active Default)
-
-Cloud-based fast inference API provider.
-
-- **Endpoint:** `https://api.groq.com/openai/v1/chat/completions`
-- **Default Model:** `qwen/qwen3.8-27b`
-- **Latency:** Sub-second (~350ms inference time).
-- **Configuration:** `GROQ_API_KEY` in environment variables.
-
----
-
-## 21.2 Gemini
-
-Cloud/API-based LLM provider from Google.
-
-- **Endpoint:** `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`
-- **Default Model:** `gemini-flash-latest` (or `gemini-3.8-flash`)
-- **Configuration:** `GEMINI_API_KEY` in environment variables.
-
----
-
-## 21.3 Local Ollama
-
-Local open-weights LLM server for offline and development environments.
-
-- **Endpoint:** `http://127.0.0.1:11434/api/chat` (configurable via `OLLAMA_BASE_URL`)
-- **Default Model:** `hf.co/unsloth/Qwen3.5-0.8B-GGUF:Q4_K_M` (configurable via `OLLAMA_MODEL`)
-- **Configuration:** `OLLAMA_BASE_URL` and `OLLAMA_MODEL` in environment variables.
-
----
-
-# 22. LLM Provider Abstraction
-
-The application decouples generation from model vendors using the `LLMProvider` contract in `src/providers/llm/`:
-
-```text
-Generation Service (`src/rag/generation/generator.ts`)
-                      ↓
-           LLMProvider (Interface)
-                      ↓
-  ┌───────────────────┼───────────────────┐
-  ↓                   ↓                   ↓
-GroqLLMProvider    GeminiLLMProvider   OllamaLLMProvider
-(Active Default)       (Cloud API)       (Local Server)
-```
-
-- `types.ts`: Defines `LLMProvider` (`generate(prompt, options)`, `providerName`, `modelName`) and `GenerateOptions` (`temperature`, `maxTokens`, `systemPrompt`).
-- `groq.ts`: Implements `GroqLLMProvider` via Groq REST API.
-- `gemini.ts`: Implements `GeminiLLMProvider` via Google Gemini REST API.
-- `ollama.ts`: Implements `OllamaLLMProvider` via local Ollama HTTP API.
-- `index.ts`: Factory function `getLLMProvider(type)` returning the active provider based on environment configuration.
-
----
-
-# 23. Embedding Provider Abstraction
-
-Embeddings follow a provider abstraction to isolate model-specific execution:
-
-```text
-Ingestion / RAG Service
-          ↓
-  EmbeddingProvider (Interface)
-          ↓
-  ┌───────────────────────────┬───────────────────────────┐
-  ↓                                                       ↓
-LocalEmbeddingProvider (Active)                 ApiEmbeddingProvider (Future Option)
-Xenova/jina-embeddings-v2-small-en                       Gemini Embeddings
-@xenova/transformers (512 dims)
-```
-
-The application keeps embedding-provider-specific logic isolated within `src/providers/embeddings/`:
-- `types.ts`: Defines the `EmbeddingProvider` contract (`generateEmbedding`, `generateEmbeddings`, `modelName`, `dimensions`).
-- `local.ts`: Active implementation of `LocalEmbeddingProvider` using `@xenova/transformers` with singleton pipeline caching.
-- `index.ts`: Provider factory (`getEmbeddingProvider`) defaulting to the local provider.
-
----
-
-# 24. Chat Flow
-
-The primary user flow is:
-
-```text
-User Question
-      ↓
-Retrieve Relevant Chunks (`src/rag/retrieval/retriever.ts`)
-      ↓
-Pre-Generation Evidence Sufficiency Check (`src/rag/generation/sufficiency.ts`)
+Evidence Sufficiency Gate
       │
-      ├─ [Insufficient: top similarity < 0.65 or 0 chunks] ──→ Return Refusal + Reason
+      ├─ [Insufficient: Top score < 0.65 OR 0 chunks] ──→ Structured Refusal Response
       │
       ↓ [Sufficient]
-Construct Grounded Context Prompt (`src/rag/generation/prompt.ts`)
+Prompt Context Construction ([Source 1], [Source 2] ...)
       ↓
-Generate Answer via LLM Provider (`src/providers/llm/`)
+LLM Provider Execution (Groq / Gemini / Ollama)
       │
-      ├─ [Model Sentinel: INSUFFICIENT_EVIDENCE] ───────────→ Return Refusal + Reason
+      ├─ [Model Refusal Sentinel: INSUFFICIENT_EVIDENCE] ──→ Structured Refusal Response
       │
-      ↓ [Model Answered]
-Extract & Map Citations (`src/rag/generation/generator.ts`)
-      ↓
-Return Grounded Answer + Citations
+      ↓ [Grounded Answer]
+Source Citation Extraction & Mapping ──→ Final Answer + Citations
 ```
+
+### 1.2 System Personas and User Journeys
+1. **End User:** Authenticates, browses accessible knowledge documents, asks natural language questions, views grounded answers with page-level citations, and maintains multi-turn conversation threads.
+2. **Administrator:** Uploads documents (PDF, TXT, DOCX), monitors real-time ingestion telemetry via WebSockets, deletes obsolete documents, and configures prompt templates.
+3. **Super Administrator:** Manages administrative users, system-wide configuration parameters, and provider settings.
 
 ---
 
-# 25. Evidence and Hallucination Control (Dual-Layer Architecture)
+# 2. Phase 1 Scope, User Roles, and Permissions
 
-The system enforces strict groundedness and anti-hallucination guarantees via a **dual-layer evidence sufficiency architecture**:
+## 2.1 Included in Phase 1
+Phase 1 delivers the foundational RAG pipeline alongside planned authentication, chat persistence, and frontend UI:
+* **Document Ingestion [Implemented]:** Multi-format file upload (PDF, TXT, DOCX), SHA-256 deduplication hashing, layout parsing via LlamaParse, structural Markdown chunking, and local filesystem storage.
+* **Vector Pipeline [Implemented]:** Local in-process embedding (`jina-embeddings-v2-small-en`, 512 dimensions) via Transformers.js, persistent storage in Supabase PostgreSQL (`pgvector`).
+* **Semantic Retrieval [Implemented]:** Cosine similarity retrieval (`<=>`) on ready document chunks using `PGVectorRetriever`.
+* **LLM Generation & Citations [Implemented]:** Multi-provider abstraction (Groq, Gemini, Ollama), dual-layer evidence sufficiency checking, grounded synthesis, and source citation extraction.
+* **Real-Time Visibility [Implemented]:** WebSocket streaming (`/ws`) of asynchronous document ingestion lifecycle events.
+* **User Authentication & RBAC [Planned - Milestone 2]:** User registration, login, stateless JWT issuance, and server-side role enforcement.
+* **Chat & History [Planned - Milestone 2]:** Multi-turn conversation threads, message persistence, and citation linkage.
+* **Prompt Management [Planned - Milestone 2]:** Database-backed prompt storage and administrative controls.
+* **Frontend Web Application [Planned - Milestone 3]:** Next.js App Router UI for document upload, real-time ingestion tracking, and conversational Q&A.
 
-1. **Layer 1: Pre-Generation Quantitative Gate (`src/rag/generation/sufficiency.ts`)**
-   - Evaluates retrieved chunks before calling the LLM.
-   - If 0 chunks are retrieved or top similarity is below `DEFAULT_MIN_SUFFICIENCY_SCORE` (default: `0.65`), generation is immediately bypassed.
-   - Returns a structured refusal (`evidenceSufficient: false`, reason, and empty citations), saving unnecessary LLM inference latency and token costs.
+## 2.2 Excluded from Phase 1
+The following are intentionally excluded to maintain architectural simplicity: microservices, Kubernetes, Kafka, Redis/caching, standalone vector databases (Pinecone/Milvus), cloud object storage (S3), OCR scanning for handwritten documents, hybrid BM25 search, cross-encoder reranking, query rewriting, and enterprise SSO.
 
-2. **Layer 2: In-Context Grounding & Refusal Sentinel Gate (`src/rag/generation/prompt.ts` & `generator.ts`)**
-   - The system prompt enforces strict rules: only retrieved evidence may be used, and if facts are insufficient or absent, the model must output `INSUFFICIENT_EVIDENCE: <explanation>`.
-   - The generator inspects the response: if the sentinel is detected, it returns `evidenceSufficient: false` along with the model's specific refusal explanation, preventing hallucination.
-   - If sufficient, the grounded response is accepted and citations are mapped.
+## 2.3 User Roles & Permissions Matrix
+The backend serves as the sole security boundary; permissions are enforced via server-side RBAC middleware:
 
----
-
-# 26. Citations (Phase 1 Implemented & Verified)
-
-Answers provide verifiable source citations linking directly to the retrieved chunks:
-
-- **Source Reference Formatting:** Evidence is numbered in context as `[Source 1]`, `[Source 2]`, etc., with metadata headers specifying filename, page number, and chunk index.
-- **Citation Extraction:** When the LLM references `[Source X]`, the generator parses the bracketed indices and resolves them to the exact `RetrievedChunk` records.
-- **Citation Payload:** Each citation contains:
-  - `documentId`: ID of the source document in PostgreSQL.
-  - `filename`: Original file name.
-  - `pageNumber`: Page number in the original document (or null for plain text).
-  - `chunkIndex`: Structural chunk index.
-  - `chunkId`: Unique chunk UUID in `document_chunks`.
-  - `similarity`: Cosine similarity score ($1 - \text{cosine\_distance}$).
-  - `snippet`: Content excerpt demonstrating the factual basis.
+| Role | Scope & Permissions | Protected Operations |
+| :--- | :--- | :--- |
+| **USER** | Standard consumer of document knowledge. Can authenticate, list accessible documents, execute queries, view grounded answers with citations, and manage personal conversation history. | Cannot upload/modify documents, cannot alter prompts, cannot access administrative endpoints. |
+| **ADMIN** | Knowledge and prompt administrator. Inherits all User permissions. Can upload documents, trigger processing, delete documents, manage prompts, and view ingestion telemetry. | Document upload/deletion (`/api/documents`), prompt CRUD (`/api/prompts`), ingestion monitoring. |
+| **SUPER_ADMIN** | System administrator. Inherits all Admin permissions. Can manage user accounts, assign roles, configure global prompts, and adjust provider configurations. | User role modification, system-level configurations, administrative user provisioning. |
 
 ---
 
-# 27. REST API
+# 3. System Architecture and Folder Responsibilities
 
-Frontend and backend communicate using REST APIs.
-
-Initial API categories:
-
-```text
-/api/auth
-/api/users
-/api/documents
-/api/prompts
-/api/conversations
-/api/chat
-```
-
-Examples:
-
-```text
-POST   /api/auth/login
-
-GET    /api/documents
-POST   /api/documents
-GET    /api/documents/:id
-DELETE /api/documents/:id
-
-GET    /api/prompts
-POST   /api/prompts
-PUT    /api/prompts/:id
-
-GET    /api/conversations
-POST   /api/conversations
-
-POST   /api/chat
-```
-
-The exact endpoints may change as implementation progresses.
-
----
-
-# 28. API Validation
-
-**Zod** will be used for request and data validation.
-
-Conceptually:
-
-```text
-HTTP Request
-     ↓
-Zod Validation
-     ↓
-Valid?
-   /   \
- YES    NO
- ↓       ↓
-Service  Error Response
-```
-
-This provides runtime validation in addition to TypeScript's compile-time type checking.
-
----
-
-# 29. Authentication and Authorization
-
-The system will use role-based access control.
-
-```text
-User
- ↓
-Authentication
- ↓
-Authenticated User
- ↓
-Role
- ├── USER
- ├── ADMIN
- └── SUPER_ADMIN
-```
-
-Authorization should happen on the backend.
-
-The frontend should not be considered the security boundary.
-
-Example:
-
-```text
-POST /api/documents
-        ↓
-Authenticate
-        ↓
-Check role
-        ↓
-ADMIN / SUPER_ADMIN?
-      /       \
-    YES        NO
-     ↓         ↓
-Upload       Reject
-```
-
-The exact authentication provider/implementation will be selected during the authentication phase.
-
----
-
-# 30. Configuration and Environment Variables
-
-Secrets must not be hardcoded into source code.
-
-Examples of future environment variables:
-
-```text
-DATABASE_URL
-SUPABASE_URL
-SUPABASE_ANON_KEY
-SUPABASE_SERVICE_ROLE_KEY
-
-GEMINI_API_KEY
-GROQ_API_KEY
-
-LLM_PROVIDER
-EMBEDDING_PROVIDER
-```
-
-Actual variable names will be finalized during implementation.
-
-Environment files containing secrets must not be committed to Git.
-
----
-
-# 31. Frontend ↔ Backend Communication
-
-The frontend communicates with the backend primarily through HTTP REST APIs, complemented by a lightweight WebSocket connection for real-time events.
-
-```text
-Next.js
-   │
-   ├─────── HTTP/REST ────────→ Express API (Uploads, document queries, mutations)
-   │
-   └─────── WebSocket ────────→ ws://host:port/ws (Live ingestion lifecycle events)
-```
-
-The frontend should not directly access the backend database for protected application operations.
-
-## 31.1 Real-Time WebSocket Layer
-
-- **Endpoint:** ws://localhost:PORT/ws
-- **Library:** Node.js ws library attached to the underlying Node HTTP server (http.createServer(app)).
-- **Scope:** In Phase 1, the WebSocket connection is dedicated exclusively to streaming background document-ingestion lifecycle events (document.processing through document.ready or document.failed).
-- **Isolation Boundary:** Application services and RAG ingestion pipelines publish events via a decoupled contract (publishIngestionEvent(type, payload)). The ingestion pipeline has no direct knowledge or management of client socket instances or connection state.
-- **Relationship with REST:** Document uploads and queries remain standard HTTP REST operations (POST /api/documents/upload, GET /api/documents). WebSockets provide unidirectional progress streaming for background jobs initiated by REST endpoints.
-
----
-
-# 32. Technology Stack
-
-## Frontend
-
-```text
-Next.js
-React
-TypeScript
-Tailwind CSS
-ESLint
-React Compiler
-```
-
-## Backend
-
-```text
-Node.js
-Express.js
-TypeScript
-ws (Realtime WebSockets)
-Zod
-```
-
-## RAG
-
-```text
-LlamaIndex.TS
-```
-
-## Database
-
-```text
-Supabase
-PostgreSQL
-pgvector
-```
-
-## Document Processing
-
-```text
-PDF
-TXT
-DOCX
-```
-
-Parser/processing technology will be selected based on document complexity.
-
-## LLM Providers
-
-```text
-Gemini
-Groq
-Local Llama / Ollama
-```
-
-## Embedding Providers
-
-Phase 1 (Selected):
-
-```text
-Xenova/jina-embeddings-v2-small-en via Transformers.js
-```
-
-- Selected Phase 1 embedding model using 512-dimensional embeddings for both documents and queries.
-
-Future Alternative:
-
-```text
-Gemini/API embedding provider
-```
-
-## Storage
-
-Phase 1:
-
-```text
-Local filesystem
-```
-
-Future:
-
-```text
-Object/cloud storage if required
-```
-
----
-
-# 33. Development Architecture
-
-Frontend and backend are intentionally maintained as separate applications.
+NNT RAG consists of two decoupled applications: a Next.js frontend and an Express.js backend communicating via HTTP REST and WebSockets.
 
 ```text
 NNT_Rag/
+├── frontend/                     # Next.js App Router, React, TypeScript, Tailwind CSS
+│   ├── src/
+│   │   ├── app/                  # Routes: layout.tsx, page.tsx, /chat, /documents, /admin
+│   │   ├── components/           # UI components (chat, document upload, citation cards)
+│   │   │   ├── ui/               # Base UI primitives (buttons, inputs, modals, alerts)
+│   │   │   ├── chat/             # Chat thread, message list, citation popovers
+│   │   │   ├── documents/        # File dropzone, upload progress table, status badges
+│   │   │   └── admin/            # Prompt editor, user management table
+│   │   ├── lib/                  # API client, auth utilities, formatting helpers
+│   │   ├── hooks/                # Custom React hooks (useWebSocket, useChat, useAuth)
+│   │   └── types/                # Frontend TypeScript contracts
+│   └── package.json
 │
-├── frontend/
-│   ├── package.json
-│   ├── node_modules/
-│   └── src/
-│
-├── backend/
-│   ├── package.json
-│   ├── node_modules/
-│   └── src/
-│
-└── PROJECT_BLUEPRINT.md
+├── backend/                      # Node.js, Express, TypeScript, Drizzle ORM, pgvector
+│   ├── uploads/                  # Phase 1 local filesystem storage for uploaded files
+│   ├── src/
+│   │   ├── server.ts             # HTTP server entrypoint & WebSocket server attachment
+│   │   ├── app.ts                # Express application configuration & route mounting
+│   │   ├── config/               # Environment variables (env.ts) and RAG defaults (rag.ts)
+│   │   ├── database/             # Drizzle connection (client.ts) and schema (schema.ts)
+│   │   ├── routes/               # Route declarations (/documents, /chat, /auth, /prompts)
+│   │   ├── controllers/          # HTTP request handlers & response orchestration
+│   │   ├── services/             # Core business logic (document.service.ts, chat.service.ts)
+│   │   ├── middleware/           # Auth (JWT), RBAC role validation, error handling
+│   │   ├── validators/           # Zod runtime request schemas
+│   │   ├── providers/            # Vendor-agnostic model adapters
+│   │   │   ├── embeddings/       # Local Transformers.js embedding provider & contracts
+│   │   │   └── llm/              # Groq, Gemini, and Ollama provider implementations
+│   │   ├── rag/                  # Modular RAG pipeline layers
+│   │   │   ├── ingestion/        # Parser, cleaner, chunker, queue, pipeline, persistence
+│   │   │   ├── retrieval/        # PGVectorRetriever (cosine similarity search)
+│   │   │   └── generation/       # Prompt builder, sufficiency gates, citation extractor
+│   │   ├── realtime/             # WebSocket server and typed ingestion lifecycle events
+│   │   ├── types/                # Shared backend interfaces
+│   │   └── utils/                # Helper utilities (hash computation, file management)
+│   └── package.json
+└── project_blueprint.md          # Authoritative system blueprint
 ```
 
-There is currently no requirement for an npm workspace or monorepo configuration.
+### 3.1 Backend Module Ownership Breakdown
+* **`config/` [Implemented]:** Centralizes environment configuration parsing (`env.ts`) and RAG hyperparameters (`rag.ts`). No process variables are read outside this module.
+* **`database/` [Implemented]:** Owns the Drizzle ORM client, connection pooling to Supabase PostgreSQL, and declarative table schema definitions (`schema.ts`).
+* **`routes/`:** Thin HTTP routing layer (`documents.routes.ts`, `chat.routes.ts` [implemented]; `auth.routes.ts`, `prompts.routes.ts` [planned]).
+* **`controllers/`:** Extracts request parameters, handles HTTP status codes, and delegates execution to services (`documents.controller.ts`, `chat.controller.ts` [implemented]).
+* **`services/`:** Implements core business logic, transactional database persistence, and orchestration (`document.service.ts` [implemented]).
+* **`middleware/`:** Houses upload handling (`upload.middleware.ts` [implemented]), and planned authentication guards (`auth.middleware.ts`), role checking (`role.middleware.ts`), and centralized error handling (`error.middleware.ts`).
+* **`validators/` [Planned]:** Zod schemas validating HTTP request bodies, query strings, and path parameters before execution.
+* **`providers/` [Implemented]:** Vendor-agnostic abstractions isolating LLM generation and embedding models behind clean contracts.
+* **`rag/` [Implemented]:** Houses the ingestion, retrieval, and generation engines implementing core RAG capabilities.
+* **`realtime/` [Implemented]:** Manages the WebSocket server and broadcasts typed ingestion telemetry events.
 
 ---
 
-# 34. Development Principles
+# 4. Backend Request Flow and API Contracts
 
-The project should follow these principles:
+## 4.1 Layered Request Architecture
+All backend operations follow strict separation of concerns:
+$$\text{HTTP Request} \longrightarrow \text{Route} \longrightarrow \text{Middleware} \longrightarrow \text{Controller} \longrightarrow \text{Service} \longrightarrow \text{RAG / Database} \longrightarrow \text{HTTP Response}$$
 
-## 34.1 Keep Responsibilities Separate
+1. **Routes (`src/routes/`):** Define endpoints and attach middleware chains.
+2. **Middleware (`src/middleware/`):** Verify JWT tokens, assert user roles, handle file uploads (Multer), and catch unhandled exceptions.
+3. **Validators (`src/validators/`):** Validate request payloads at runtime using Zod schemas.
+4. **Controllers (`src/controllers/`):** Parse input parameters, invoke services, and format standardized JSON responses.
+5. **Services (`src/services/`):** Coordinate database transactions, background processing, and RAG execution.
 
-Frontend:
+## 4.2 REST API Endpoints Specification
 
-> UI and user interaction.
+| Category | Endpoint | Method | Auth / Role | Input Payload | Output / Response | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **System** | `/` | `GET` | Public | None | `{ message: string }` | **Implemented** (Public health check) |
+| **Documents**| `/api/documents/upload` | `POST` | Currently Unauthenticated (Planned `ADMIN`) | `multipart/form-data` (`files[]`) | `{ uploaded: Document[], skipped: SkippedDoc[] }` | **Implemented** (Active route; auth planned) |
+| | `/api/documents` | `GET` | Currently Unauthenticated (Planned `USER`) | None | `Document[]` | **Implemented** (Active route; auth planned) |
+| | `/api/documents/:id` | `GET` | Currently Unauthenticated (Planned `USER`) | None | `Document & { chunkCount: number }` | **Implemented** (Active route; auth planned) |
+| | `/api/documents/:id` | `DELETE`| Currently Unauthenticated (Planned `ADMIN`) | None | `{ message: string, documentId: string, filename: string }` | **Implemented** (Active route; auth planned) |
+| **Auth** | `/api/auth/register` | `POST` | Public | `{ email, password, name }` | `{ user: { id, email, role }, token }` | Planned (Milestone 2) |
+| | `/api/auth/login` | `POST` | Public | `{ email, password }` | `{ user: { id, email, role }, token }` | Planned (Milestone 2) |
+| **Chat** | `/api/chat` | `POST` | Currently Unauthenticated (Planned `USER`) | `{ query, documentId? }` | `{ answer, evidenceSufficient, citations, modelName, providerName }` | **Implemented** (Active route; auth & session persistence planned) |
+| | `/api/conversations` | `GET` | `USER` | `?limit=20&offset=0` | `Conversation[]` | Planned (Milestone 2) |
+| | `/api/conversations/:id` | `GET` | `USER` | None | `Conversation & { messages: Message[] }` | Planned (Milestone 2) |
+| **Prompts** | `/api/prompts` | `GET` | `ADMIN` | None | `Prompt[]` | Planned (Milestone 2) |
+| | `/api/prompts` | `POST` | `ADMIN` | `{ name, content, type }` | `Prompt` | Planned (Milestone 2) |
+| | `/api/prompts/:id` | `PUT` | `ADMIN` | `{ content?, status? }` | `Prompt` | Planned (Milestone 2) |
 
-Backend:
+*\*Note: The core RAG generation pipeline (`generateAnswer` in `src/rag/generation/generator.ts`) is fully implemented; wrapping it into the `/api/chat` HTTP route with conversational message persistence is scheduled for Milestone 2.*
 
-> API, authentication, business logic, RAG orchestration.
-
-Database:
-
-> Persistent application and vector data.
-
-LlamaIndex:
-
-> RAG framework functionality.
-
-LLM providers:
-
-> Generation/inference.
-
----
-
-## 34.2 Avoid Unnecessary Complexity
-
-Do not introduce infrastructure simply because it is common in large systems.
-
-Every additional technology should have a clear reason.
-
----
-
-## 34.3 Prefer Framework Capabilities
-
-Use established capabilities of:
-
-- Next.js
-- Express
-- LlamaIndex.TS
-- PostgreSQL
-- pgvector
-- Supabase
-
-before implementing custom replacements.
-
----
-
-## 34.4 Keep Providers Replaceable
-
-LLM and embedding providers should be abstracted sufficiently that changing providers does not require rewriting the complete application.
+### 4.3 Standard HTTP Response & Error Contracts
+* **Success Envelope (200 OK / 201 Created):**
+  ```json
+  {
+    "data": { ... },
+    "message": "Operation completed successfully"
+  }
+  ```
+* **Error Envelope (400 / 401 / 403 / 404 / 500):**
+  ```json
+  {
+    "error": "Human-readable error description",
+    "statusCode": 400,
+    "details": [
+      { "field": "email", "message": "Invalid email address format" }
+    ]
+  }
+  ```
 
 ---
 
-## 34.5 Backend Is the Security Boundary
+# 5. Document Ingestion and Background Processing
 
-Authorization, role checking, document access, prompt access, and protected operations must be enforced on the backend.
-
----
-
-# 35. Current Project State
-
-## Completed
-
-### Frontend
-
-Next.js application initialized with:
+Document ingestion converts raw files into indexed vector chunks asynchronously without blocking HTTP threads.
 
 ```text
-TypeScript: Yes
-ESLint: Yes
-React Compiler: Yes
-Tailwind CSS: Yes
-src directory: Yes
-App Router: Yes
-Default @/* alias: Yes
-AGENTS.md: Yes
+Upload ──→ SHA-256 Hash ──→ Ingestion Queue ──→ LlamaParse ──→ Normalizer
+                                                                    │
+Ready ←── pgvector Commit ←── Embed (Jina v2) ←── Structural Chunker ←┘
 ```
 
-### Backend
+## 5.1 Pipeline Stages (`src/rag/ingestion/`)
+1. **Validation & Deduplication (`document.service.ts`):** Validates format (`.pdf`, `.docx`, `.txt`). Computes SHA-256 hash across raw file bytes; duplicate hashes are skipped to prevent redundant compute:
+   ```typescript
+   export interface ProcessUploadResult {
+     uploaded: Document[];
+     skipped: { filename: string; reason: string }[];
+   }
+   ```
+2. **Local Storage:** Files are persisted to `backend/uploads/{timestamp}-{filename}`.
+3. **Ingestion Queue (`queue.ts`):** In-memory asynchronous concurrency queue processing up to `INGESTION_CONCURRENCY = 3` documents simultaneously.
+4. **Layout Parsing (`parser.ts`):** LlamaParse extracts text, structural headings, tables, and page markers into clean Markdown using `LLAMAPARSE_API_KEY`.
+5. **Text Normalization (`cleaner.ts`):** Strips parsing artifacts, normalizes consecutive whitespace and linebreaks, cleans table formatting.
+6. **Structural Chunking (`chunker.ts`):**
+   - *Primary Strategy:* Heading-aware structural Markdown chunker segmenting at Markdown headers (`#`, `##`, `###`) to preserve topical context (`DEFAULT_STRUCTURAL_TARGET = 1000`, `DEFAULT_STRUCTURAL_MAX = 1200`). Micro-chunks below `DEFAULT_MIN_CHUNK_CHARS = 300` are merged into adjacent content to prevent isolated header fragments.
+   - *Fallback Strategy:* Recursive sentence-splitting text splitter (`DEFAULT_FALLBACK_CHUNK_SIZE = 1000`, `DEFAULT_FALLBACK_OVERLAP = 120`) applied to documents without structural headers.
+7. **Vector Embedding (`pipeline.ts`):** Batched embedding generation via in-process local model.
+8. **Persistence (`persistence.ts`):** Writes chunks and 512-dimensional embeddings to `document_chunks` table within a single transaction, then transitions document status to `ready`.
 
-Node/Express/TypeScript application initialized.
+## 5.2 Document States and Lifecycle Transitions
+* `uploaded`: File saved to disk, metadata registered in `documents` table, awaiting queue execution.
+* `processing`: Document currently undergoing parsing, chunking, or embedding.
+* `ready`: Chunks and vectors committed to PostgreSQL pgvector; searchable by retrieval engine.
+* `failed`: Unrecoverable error encountered; error recorded in server logs and WebSocket telemetry.
 
-Installed:
+---
 
-```text
-express
-typescript
-tsx
-@types/node
-@types/express
+# 6. Database Schema, Storage, and Vector Configuration
+
+The database is hosted on **Supabase PostgreSQL** with pgvector extension `0.8.2` enabled. Persistence is managed via **Drizzle ORM**.
+
+## 6.1 Implemented Schema (`src/database/schema.ts`)
+
+```typescript
+// roles: Canonical role definitions (USER, ADMIN, SUPER_ADMIN)
+export const roles = pgTable("roles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull().unique(), // USER | ADMIN | SUPER_ADMIN
+  description: text("description"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// users: User authentication profiles
+export const users = pgTable("users", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  roleId: uuid("role_id").notNull().references(() => roles.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_users_email").on(table.email),
+  index("idx_users_role_id").on(table.roleId),
+]);
+
+// documents: Stores file metadata, hashing, and ingestion status
+export const documents = pgTable("documents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  filename: text("filename").notNull(),
+  fileType: text("file_type").notNull(),
+  filePath: text("file_path").notNull(),
+  contentHash: text("content_hash").notNull().unique(),
+  status: text("status").notNull().default("uploaded"), // uploaded | processing | ready | failed
+  uploadedBy: uuid("uploaded_by"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// document_chunks: Stores chunked text, page numbers, and 512-dim pgvector embeddings
+export const documentChunks = pgTable("document_chunks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  documentId: uuid("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  pageNumber: integer("page_number"),
+  chunkIndex: integer("chunk_index").notNull(),
+  embedding: vector("embedding", { dimensions: 512 }),
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_document_chunks_document_id").on(table.documentId),
+]);
+
+export type Role = typeof roles.$inferSelect;
+export type NewRole = typeof roles.$inferInsert;
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+export type Document = typeof documents.$inferSelect;
+export type NewDocument = typeof documents.$inferInsert;
+export type DocumentChunk = typeof documentChunks.$inferSelect;
+export type NewDocumentChunk = typeof documentChunks.$inferInsert;
 ```
 
-Backend TypeScript configuration is working.
+## 6.2 Planned Schema Entities (Phase 1 Milestone 2: Prompts & Conversations)
+*(Architectural design for upcoming chat history & prompt management; not yet declared in `src/database/schema.ts`)*
 
-A basic Express server has been created and tested successfully.
+```typescript
 
-Current server test:
+// prompts: Admin-configured RAG and system prompts
+export const prompts = pgTable("prompts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull().unique(),
+  content: text("content").notNull(),
+  type: text("type").notNull(), // system | rag | citation
+  status: text("status").notNull().default("active"), // active | draft
+  createdBy: uuid("created_by").references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
-```text
-http://localhost:3000
+// conversations: Multi-turn chat sessions
+export const conversations = pgTable("conversations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// messages: Chat history entries linked to conversations
+export const messages = pgTable("messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  conversationId: uuid("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+  role: text("role").notNull(), // user | assistant
+  content: text("content").notNull(),
+  citations: jsonb("citations").default([]),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 ```
 
-returns:
+---
 
-```json
-{
-  "message": "NNT RAG Backend is running"
+# 7. Embeddings, Retrieval, and Similarity Search
+
+## 7.1 In-Process Local Embeddings (`src/providers/embeddings/`)
+* **Model:** `Xenova/jina-embeddings-v2-small-en` via Transformers.js (`@xenova/transformers`).
+* **Vector Dimension:** `512` (aligns with `vector(512)` in Supabase PostgreSQL).
+* **Pooling & Normalization:** Mean pooling with L2 normalization (`normalize: true`). Unit-norm vectors guarantee mathematical identity between cosine distance and dot-product ranking:
+  $$\|u\| = 1, \quad \|v\| = 1 \implies \text{Cosine Similarity} = u \cdot v$$
+* **Provider Implementation:** `LocalEmbeddingProvider` implements `EmbeddingProvider`. Utilizes a singleton pipeline promise to prevent duplicate model loads in memory.
+* **API Embedding Provider Option:** The `EmbeddingProvider` interface allows plugging in high-throughput cloud providers (e.g. Gemini Embeddings) in future phases without altering ingestion logic.
+
+```typescript
+export interface EmbeddingProvider {
+  readonly modelName: string;
+  readonly dimensions: number;
+  generateEmbedding(text: string): Promise<number[]>;
+  generateEmbeddings(texts: string[]): Promise<number[][]>;
 }
 ```
 
-### Database
+## 7.2 Semantic Retrieval Layer (`src/rag/retrieval/`)
+* **Retriever:** `PGVectorRetriever` extending LlamaIndex.TS `BaseRetriever`.
+* **Distance Metric:** PostgreSQL pgvector cosine distance operator (`<=>`).
+* **Similarity Score Expression:**
+  ```typescript
+  const similarityExpr = sql<number>`1 - (${cosineDistance(documentChunks.embedding, queryEmbedding)})`;
+  ```
+* **Query Constraints:** Filters strictly by documents where `status = 'ready'`. Orders by distance ascending (similarity descending).
+* **Parameters:** Configurable `topK` (default: `5`, via `DEFAULT_RETRIEVAL_TOP_K`), optional `documentId` filter, content deduplication to prevent repetitive chunks across pages, optional `minSimilarity` threshold (default: `0.50`, via `DEFAULT_MIN_SIMILARITY`).
+* **Compatibility:** Emits LlamaIndex `NodeWithScore` objects containing `TextNode` instances for Phase 2 query-engine compatibility.
 
-Supabase project created.
+```typescript
+export interface RetrievedChunk {
+  id: string;
+  documentId: string;
+  filename: string;
+  content: string;
+  pageNumber: number | null;
+  chunkIndex: number;
+  similarity: number;
+  metadata?: Record<string, unknown>;
+}
 
-PostgreSQL database is accessible through pgAdmin.
-
-pgvector extension is enabled and verified.
-
-Current pgvector version:
-
-```text
-0.8.2
+export interface RetrieveOptions {
+  topK?: number | undefined;
+  documentId?: string | undefined;
+  minSimilarity?: number | undefined;
+  embeddingProvider?: EmbeddingProvider | undefined;
+}
 ```
 
 ---
 
-# 36. Current Development Stage
+# 8. LLM Providers, Prompt Management, and Generation
 
-Current stage:
+## 8.1 LLM Provider Abstraction (`src/providers/llm/`)
+Vendor-neutral interface communicating via native Node.js `fetch` (zero third-party wrapper dependencies):
+
+```typescript
+export interface GenerateOptions {
+  temperature?: number | undefined;
+  maxTokens?: number | undefined;
+  systemPrompt?: string | undefined;
+}
+
+export interface LLMProvider {
+  readonly providerName: string;
+  readonly modelName: string;
+  generate(prompt: string, options?: GenerateOptions): Promise<string>;
+}
+```
+
+### Supported Providers
+1. **Groq (Cloud API):** Endpoint `https://api.groq.com/openai/v1/chat/completions`, model `qwen/qwen3.8-27b`. Configured via `GROQ_API_KEY` and `GROQ_MODEL`.
+2. **Google Gemini (Cloud API):** Endpoint `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`, model `gemini-flash-latest`. Configured via `GEMINI_API_KEY` and `GEMINI_MODEL`.
+3. **Local Ollama (Local Server):** Endpoint `http://127.0.0.1:11434/api/chat`, model `hf.co/unsloth/Qwen3.5-0.8B-GGUF:Q4_K_M`. Configured via `OLLAMA_BASE_URL` and `OLLAMA_MODEL`. Supports thinking token stream fallback.
+
+**Provider Selection:** Controlled via `LLM_PROVIDER` (`groq` | `gemini` | `ollama`). Factory function `getLLMProvider()` instantiates the designated provider.
+
+```typescript
+export const getLLMProvider = (providerType: string = LLM_PROVIDER): LLMProvider => {
+  switch (providerType.toLowerCase()) {
+    case "groq": return groqLLMProvider;
+    case "gemini": return geminiLLMProvider;
+    case "ollama": return ollamaLLMProvider;
+    default: return groqLLMProvider;
+  }
+};
+```
+
+## 8.2 Prompt Architecture (`src/rag/generation/prompt.ts`)
+The generation layer enforces strict grounding through `DEFAULT_RAG_SYSTEM_PROMPT`:
+```text
+You are a precise, truth-focused document question-answering assistant.
+Your answers MUST be strictly grounded in the provided Evidence Sources.
+
+CRITICAL RULES:
+1. Use ONLY the facts directly mentioned in the provided Evidence Sources. Do NOT use outside knowledge, prior knowledge, speculation, or unstated assumptions.
+2. If the provided Evidence Sources do not contain sufficient information to directly answer the question, or if they are irrelevant to the question, you MUST decline to answer and respond with EXACTLY:
+INSUFFICIENT_EVIDENCE: <brief explanation of what information is missing>
+3. If the evidence IS sufficient, answer the user's question clearly, concisely, and accurately based only on the sources.
+4. Always cite your sources in the text using bracketed source tags like [Source 1], [Source 2] immediately following the facts they support.
+5. Do NOT invent or make up citations. Only cite sources provided in the Evidence Sources list.
+```
+
+Context formatting concatenates evidence with numbered tags:
+`[Source {i}] (Document: "{filename}", Page: {page}, Chunk: {index}):\n{content}`
+
+---
+
+# 9. Evidence Sufficiency, Grounding Safeguards, and Citations
+
+The generation pipeline implements a **dual-layer grounding verification architecture to minimize hallucinations**:
 
 ```text
-Foundation Setup
-       ↓
-Frontend initialized       ✓
-Backend initialized        ✓
-Express tested             ✓
-Supabase configured        ✓
-pgvector enabled           ✓
-       ↓
-Backend architecture       ← CURRENT
-       ↓
-Database schema
-       ↓
-Authentication
-       ↓
-Document management
-       ↓
-Document processing
-       ↓
-Embedding + vector storage
-       ↓
-RAG retrieval
-       ↓
-LLM generation
-       ↓
-Chat
-       ↓
-Frontend integration
-       ↓
-Testing / evaluation
-       ↓
-Deployment
+Retrieved Chunks ──→ Layer 1: Pre-Generation Gate (src/rag/generation/sufficiency.ts)
+                         │
+                         ├─ [0 Chunks OR Top Similarity < 0.65] ──→ Structured Refusal (Bypass LLM)
+                         │
+                         ↓ [Sufficient]
+                     Layer 2: In-Context Sentinel Gate (src/rag/generation/prompt.ts)
+                         │
+                         ├─ [Model outputs "INSUFFICIENT_EVIDENCE: ..."] ──→ Structured Refusal
+                         │
+                         ↓ [Model outputs Grounded Answer]
+                     Extract & Map Citations (src/rag/generation/generator.ts)
+```
+
+## 9.1 Sufficiency Gates
+1. **Layer 1: Pre-Generation Quantitative Gate (`sufficiency.ts`):** Checks retrieved chunk count and top cosine similarity against `DEFAULT_MIN_SUFFICIENCY_SCORE = 0.65`. If similarity is below threshold, generation short-circuits immediately. Returns `evidenceSufficient: false`, saving token cost and inference latency.
+2. **Layer 2: In-Context Refusal Sentinel Gate (`generator.ts`):** If retrieved chunks are topically adjacent but fail to address the specific question, the system prompt instructs the model to return `INSUFFICIENT_EVIDENCE: <reason>`. The generator parses this prefix, sets `evidenceSufficient: false`, and provides a user-friendly refusal message without fabricating content.
+
+## 9.2 Source Citations Mapping
+* **Tag Matching:** Generator scans response text for `\[Source\s+(\d+)\]` patterns.
+* **Metadata Attachment:** Maps source indices back to `RetrievedChunk` instances to assemble structured `Citation` objects:
+
+```typescript
+export interface Citation {
+  documentId: string;
+  filename: string;
+  pageNumber: number | null;
+  chunkIndex: number;
+  chunkId: string;
+  similarity: number;
+  snippet: string; // Excerpt (~200 characters)
+}
+
+export interface GenerateAnswerResult {
+  answer: string;
+  evidenceSufficient: boolean;
+  refusalReason?: string | undefined;
+  citations: Citation[];
+  retrievedChunks: RetrievedChunk[];
+  modelName: string;
+  providerName: string;
+}
 ```
 
 ---
 
-# 37. Evaluation and RAG Quality
+# 10. WebSocket Events and Real-Time Communication
 
-RAG quality should not be judged only by whether the application runs.
+A lightweight WebSocket server is mounted on the Node HTTP server at path `/ws`. It streams background document ingestion progress directly to clients without polling.
 
-A small evaluation dataset should eventually be created containing:
+## 10.1 Ingestion Lifecycle Events Contract (`src/realtime/events.ts`)
 
-```text
-Question
-Expected answer
-Expected source document
-Expected page/chunk
+```typescript
+export type IngestionEventType =
+  | "document.processing"
+  | "document.parsing"
+  | "document.chunking"
+  | "document.embedding"
+  | "document.ready"
+  | "document.failed";
+
+export interface IngestionEventPayload {
+  documentId: string;
+  filename?: string;
+  totalChunks?: number;
+  totalPages?: number;
+  error?: string;
+  timestamp?: string;
+}
+
+export interface IngestionEvent {
+  type: IngestionEventType;
+  payload: IngestionEventPayload;
+}
 ```
 
-Evaluation should consider:
+| Event Name | Stage Description | Payload Metadata |
+| :--- | :--- | :--- |
+| `document.processing` | Ingestion initiated; document marked as processing | `{ documentId, filename }` |
+| `document.parsing` | Text and layout extraction begun via LlamaParse | `{ documentId, filename }` |
+| `document.chunking` | Content segmented into structural chunks | `{ documentId, filename, totalPages }` |
+| `document.embedding` | Chunk vector embeddings being generated | `{ documentId, filename, totalChunks }` |
+| `document.ready` | Chunks & vectors persisted; document ready | `{ documentId, filename, totalPages, totalChunks }` |
+| `document.failed` | Unrecoverable error encountered | `{ documentId, filename, error }` |
 
-- Retrieval quality.
-- Answer correctness.
-- Citation correctness.
-- Evidence sufficiency.
-- Hallucination rate.
-- Response latency.
-- Provider differences.
-
-The exact evaluation framework will be selected later.
+**Decoupled Architecture:** Business logic emits events through `publishIngestionEvent(type, payload)`. The RAG pipeline remains completely decoupled from client socket state.
 
 ---
 
-# 38. Future Improvements
+# 11. Authentication, Validation, and Security Contracts (Planned Milestone 2)
 
-Potential future features:
+The security architecture specifies requirements for the planned authentication and authorization layer (Milestone 2):
 
-- Cloud object storage.
-- Advanced document parsing.
-- OCR/scanned-document support.
-- Hybrid retrieval.
-- Reranking.
-- Query rewriting.
-- Conversation-aware retrieval.
-- Prompt versioning.
-- Advanced permissions.
-- Multi-tenant architecture.
-- Background document processing.
-- Job queues.
-- Redis/caching.
-- Advanced monitoring.
-- RAG evaluation dashboards.
-- Streaming responses.
-- Enterprise authentication.
-- Production deployment infrastructure.
+1. **Backend as Security Boundary:** Role verification, file validation, document authorization, and prompt management must be validated on Express routes. The frontend is never trusted as a security barrier.
+2. **Password Hashing:** Salted hashing via `bcrypt` (10 rounds). Plaintext passwords must never be logged or stored.
+3. **Session Tokens:** Stateless JWT tokens passed via `Authorization: Bearer <token>` containing payload `{ sub: userId, role: string, exp: number }`.
+4. **Input Validation (Architectural Contract):** Planned runtime controller input validation using strict Zod schemas with TypeScript type inference (`z.infer<typeof schema>`), to be wired into route middleware (`src/validators/`):
+   ```typescript
+   export const uploadDocumentSchema = z.object({
+     files: z.array(z.any()).min(1, "At least one file must be provided"),
+   });
 
-These are **future possibilities**, not Phase 1 requirements.
+   export const chatQuerySchema = z.object({
+     query: z.string().trim().min(1, "Query cannot be empty"),
+     conversationId: z.string().uuid().optional(),
+     documentId: z.string().uuid().optional(),
+   });
+   ```
+5. **Data Protection:** Database credentials, cloud keys, and API tokens must never be committed to Git. `.env` is strictly ignored. All database queries use Drizzle ORM parameterized statements to eliminate SQL injection vulnerabilities.
 
 ---
 
-# 39. Important Architecture Decisions
+# 12. Environment Configuration and Development Rules
 
-| Decision         | Current Choice                     | Reason                                          |
-| ---------------- | ---------------------------------- | ----------------------------------------------- |
-| Frontend         | Next.js + TypeScript               | Modern React application framework              |
-| Backend          | Node.js + Express + TypeScript     | Lightweight REST API backend                    |
-| RAG Framework    | LlamaIndex.TS                      | Dedicated RAG framework                         |
-| Database         | Supabase PostgreSQL                | Hosted relational database                      |
-| Vector Search    | pgvector                           | Vector search inside PostgreSQL                 |
-| File Storage     | Local filesystem                   | Simple Phase 1 implementation                   |
-| API Style        | REST + JSON                        | Simple frontend/backend separation              |
-| Validation       | Zod                                | Runtime request validation                      |
-| LLMs             | Gemini + Groq + Local Llama/Ollama | Provider flexibility                            |
-| Embeddings       | Local + API                        | Provider flexibility                            |
-| Documents        | PDF + TXT + DOCX                   | Initial document coverage                       |
-| Frontend/Backend | Separate applications              | Clear responsibility separation                 |
-| Architecture     | Modular application                | Maintainability without premature microservices |
+## 12.1 Environment Variables Reference (`backend/src/config/env.ts`)
 
----
+| Variable | Required | Default / Fallback | Purpose |
+| :--- | :--- | :--- | :--- |
+| `PORT` | Optional | `3000` | Express server port |
+| `CORS_ORIGIN` | Optional | `http://localhost:3000,http://localhost:3001` | Allowed frontend origins for CORS (comma-separated) |
+| `DATABASE_URL` | **Required** | None | Supabase PostgreSQL connection string |
+| `LLAMAPARSE_API_KEY` | **Required** | None | LlamaParse document extraction API key |
+| `JWT_SECRET` | **Required (prod)** | None (no insecure fallback) | Secret key used for signing and verifying authentication JWTs |
+| `JWT_EXPIRES_IN` | Optional | `7d` | Token expiration lifespan for issued JWT session tokens |
+| `EMBEDDING_PROVIDER` | Optional | `local` | Active embedding provider (`local`) |
+| `EMBEDDING_MODEL` | Optional | `Xenova/jina-embeddings-v2-small-en` | Active embedding model |
+| `LLM_PROVIDER` | Optional | `ollama` (or `groq` / `gemini`) | Active LLM generation provider |
+| `LLM_MODEL` | Optional | Dynamic matching active provider | Global override for LLM model |
+| `GROQ_API_KEY` | Optional | `""` | Groq cloud API key |
+| `GROQ_MODEL` | Optional | `qwen/qwen3.8-27b` | Default Groq model |
+| `GEMINI_API_KEY` | Optional | `""` | Google Gemini API key |
+| `GEMINI_MODEL` | Optional | `gemini-flash-latest` | Default Gemini model |
+| `OLLAMA_BASE_URL` | Optional | `http://127.0.0.1:11434` | Local Ollama HTTP endpoint |
+| `OLLAMA_MODEL` | Optional | `hf.co/unsloth/Qwen3.5-0.8B-GGUF:Q4_K_M`| Default Ollama model |
+| `INGESTION_CONCURRENCY`| Optional | `3` | Parallel background document worker limit |
 
-# 40. Architecture Decision Log
-
-Important changes should be recorded here.
-
-Format:
-
-```text
-Date:
-Decision:
-Reason:
-Impact:
-```
-
-Example:
-
-```text
-Date: 2026-10-05
-
-Decision:
-Use Supabase PostgreSQL + pgvector instead of a separate vector database.
-
-Reason:
-Phase 1 requires both relational and vector data, and PostgreSQL can handle both.
-
-Impact:
-No separate vector database is required initially.
-```
-
-```text
-Date: 2026-10-07
-
-Decision:
-Adopt Xenova/jina-embeddings-v2-small-en via Transformers.js (@xenova/transformers) as the primary Phase 1 embedding model.
-
-Reason:
-Phase 1 requires a reliable, local, zero-cost, privacy-preserving embedding generation layer. The model produces 512-dimensional L2-normalized embeddings via mean pooling, perfectly matching our pgvector vector(512) database schema.
-
-Impact:
-Implemented in `src/providers/embeddings/local.ts` with singleton pipeline caching. Verified on a real parsed document chunk with confirmed 512-dimensional unit-norm output (~325ms latency). API embeddings (e.g. Gemini) remain an architectural option behind the `EmbeddingProvider` interface.
-```
-
-```text
-Date: 2026-10-08
-
-Decision:
-Initialize a minimal WebSocket communication layer using the `ws` library attached to the Express HTTP server at path `/ws`.
-
-Reason:
-Background document ingestion is asynchronous. Polling REST endpoints causes unnecessary network overhead and latency. WebSockets allow the ingestion pipeline to push live status and progress updates directly to connected clients as stages complete.
-
-Impact:
-Created `backend/src/realtime/` with a typed event contract (`events.ts`) and server manager (`server.ts`). Ingestion pipeline broadcasts 6 lifecycle events (`document.processing`, `document.parsing`, `document.chunking`, `document.embedding`, `document.ready`, `document.failed`) via `publishIngestionEvent()`. Decoupled boundary keeps RAG logic completely independent of network sockets. No changes to frontend or chat streaming in this phase.
-```
-
-```text
-Date: 2026-10-08
-
-Decision:
-Implement the RAG retrieval layer in `src/rag/retrieval/` using cosine similarity (`<=>`) with PostgreSQL + pgvector and LlamaIndex.TS `BaseRetriever`.
-
-Reason:
-Phase 1 requires independent, high-performance semantic retrieval over ingested document chunks without premature LLM chat streaming coupling. Subclassing LlamaIndex's `BaseRetriever` adheres to Section 12 and Section 34.3 while maintaining direct compatibility with our Drizzle ORM pgvector schema.
-
-Impact:
-Created `src/rag/retrieval/` (`types.ts`, `retriever.ts`, `index.ts`). Verified with natural language queries against real document chunks, returning ranked results with cosine similarity scores and complete metadata.
-```
+## 12.2 Development Rules (AGENTS.md)
+* **Smallest Clean Implementation:** Implement only what is directly requested. Never introduce speculative scaffolding or redundant wrapper layers.
+* **Preserve Working Code:** Modify only files required for the task. Do not rewrite or restyle unrelated working code.
+* **Node.js ESM Standard:** Use ESM imports with mandatory `.js` file extensions (`import ... from "./foo.js"`).
+* **Strict TypeScript:** Strict type safety required (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`). No `any` types.
+* **Blueprint Synchronization:** Update this document whenever an architectural or technical contract changes.
 
 ---
 
-# 41. Rules for Future Development
+# 13. Current Project Status, Testing, and Phase 1 Acceptance Criteria
 
-Before introducing a new technology, ask:
+## 13.1 Implementation Status
 
-1. What problem does it solve?
-2. Is the problem already solved by our existing stack?
-3. Does it add unnecessary complexity?
-4. Does it fit the current architecture?
-5. Is it required for Phase 1?
-6. Can we postpone it?
+| Component | Status | Verified Implementation Details |
+| :--- | :--- | :--- |
+| **Database & pgvector** | **Implemented** | Supabase PostgreSQL, pgvector 0.8.2, vector(512), Drizzle schema with cascading deletes. |
+| **Document Ingestion** | **Implemented** | Multipart upload, SHA-256 deduplication, LlamaParse parsing, structural chunking, queue (`concurrency=3`). |
+| **Local Embeddings** | **Implemented** | In-process Jina v2 small (512 dims, unit norm) via Transformers.js with singleton pipeline caching. |
+| **Semantic Retrieval** | **Implemented** | `PGVectorRetriever` with cosine distance (`<=>`), status filtering, topK parameterization. |
+| **LLM Provider Layer** | **Implemented** | Vendor-agnostic HTTP adapters for Groq, Gemini, and Ollama. |
+| **Evidence Sufficiency** | **Implemented** | Dual-layer check: pre-generation score gate (`0.65`) + in-context refusal sentinel. |
+| **Grounded Answer & Citations**| **Implemented** | Strict grounding prompt, source tag extraction, metadata citation resolution. |
+| **Realtime WebSockets** | **Implemented** | Mounted on `/ws`, broadcasts 6 ingestion lifecycle events. |
+| **Chat HTTP Endpoint** | **Implemented** | Express endpoint `POST /api/chat` with input validation, error handling, evidence sufficiency gating, and citations. |
+| **Conversation Persistence**| **Planned** | Database tables (`conversations`, `messages`), multi-turn session persistence service. |
+| **User Authentication & RBAC** | **Planned** | Database tables (`users`, `roles`), bcrypt hashing, JWT issuance and route protection middleware. |
+| **Prompt Management API** | **Planned** | Database table (`prompts`), admin CRUD endpoints for system/RAG prompt overrides. |
+| **Next.js Frontend UI** | **Planned** | Initial Next.js starter setup; document upload UI and chat interface pending. |
 
-Before changing an existing architecture decision:
+## 13.2 Acceptance Criteria by Milestone
 
-1. Update this blueprint.
-2. Record the reason in the decision log.
-3. Check which existing components are affected.
-4. Update implementation accordingly.
+### Milestone 1: Foundational RAG, Ingestion & Retrieval (Implemented)
+- [x] **Document Ingestion:** Multi-file upload (PDF, DOCX, TXT) parsed via LlamaParse, structurally chunked, embedded locally, and indexed into pgvector with live WebSocket telemetry (`/ws`).
+- [x] **Deduplication:** SHA-256 content hashing prevents redundant document ingestion.
+- [x] **Semantic Retrieval:** `PGVectorRetriever` retrieves top-K chunks via pgvector cosine distance (`<=>`).
+- [x] **Sufficiency Gating & Refusal:** Quantitative similarity score gate (`0.65`) and in-context sentinel (`INSUFFICIENT_EVIDENCE:`) trigger structured refusal on insufficient evidence.
+- [x] **Grounded Generation & Citations:** LLM synthesis strictly grounded in evidence chunks with bracketed `[Source X]` citations mapped to source metadata.
+- [x] **Multi-Provider LLM Integration:** Flexible support for Groq, Gemini, and local Ollama.
+- [x] **Build Verification:** Zero TypeScript compilation errors (`npm run build`).
 
----
+### Milestone 2: Authentication, Chat Persistence & Administration (Planned)
+- [ ] **Authentication & RBAC:** User registration/login with bcrypt hashing, stateless JWT issuance, and server-side role middleware on protected routes.
+- [ ] **Conversational History:** Multi-turn conversation sessions and message persistence in PostgreSQL (`conversations`, `messages`).
+- [ ] **Chat HTTP Route:** Express endpoint `/api/chat` orchestrating `generateAnswer` with conversation persistence.
+- [ ] **Prompt Administration:** Database-backed prompt storage and administrative CRUD endpoints (`/api/prompts`).
+- [ ] **Document Lifecycle Management:** Document deletion endpoint (`DELETE /api/documents/:id`) with cascading chunk removal.
 
-# 42. Source of Truth
-
-This document is the primary project-level reference for:
-
-- Product scope.
-- Architecture.
-- Technology decisions.
-- Folder structure.
-- Roles.
-- RAG behavior.
-- Database direction.
-- LLM/embedding strategy.
-- Development principles.
-
-If implementation and this document disagree, the discrepancy should be reviewed rather than silently ignoring the document.
-
-The blueprint should be updated whenever an important architectural decision changes.
-
----
-
-# 43. Phase 1 Final Target
-
-At the end of Phase 1, the expected system should support:
-
-```text
-                    NNT RAG
-                       │
-                       ↓
-                  User Login
-                       │
-                       ↓
-                  Chat Interface
-                       │
-                       ↓
-                Ask a Question
-                       │
-                       ↓
-                 Backend API
-                       │
-                       ↓
-                 RAG Pipeline
-                       │
-              ┌────────┴────────┐
-              ↓                 ↓
-          Retrieval         Prompt Load
-              │                 │
-              └────────┬────────┘
-                       ↓
-                 Evidence Check
-                       │
-                       ↓
-                    LLM
-                       │
-                       ↓
-             Answer + Citations
-                       │
-                       ↓
-                    User
-```
-
-Administrators should be able to:
-
-```text
-Login
-  ↓
-Upload Document
-  ↓
-Process Document
-  ↓
-Document Ready
-  ↓
-Manage Prompts
-```
-
-The complete system should therefore provide a functional foundation for a production-oriented document Q&A RAG application while keeping the architecture simple enough to evolve.
+### Milestone 3: Next.js Frontend Web Application (Planned)
+- [ ] **Document Upload Interface:** Drag-and-drop file upload with real-time WebSocket progress bars.
+- [ ] **Chat Interface:** Interactive conversational UI rendering grounded responses with clickable citation popovers and source text snippets.
+- [ ] **Administration Console:** Prompt template management and document registry.
 
 ---
 
-# 44. Current Principle
+# 14. Architecture Decision Log & Future Scope
 
-> **Build a clean, modular Phase 1 system first. Do not add infrastructure or complexity until the actual requirement justifies it.**
+## 14.1 Architecture Decision Log
+* **2026-10-05 — Unified Supabase Database:** Selected Supabase PostgreSQL + pgvector over standalone vector databases. Consolidates relational data and vector embeddings into a single transactional database, avoiding distributed sync complexity.
+* **2026-10-07 — In-Process Local Embeddings:** Adopted `Xenova/jina-embeddings-v2-small-en` (512 dimensions) via Transformers.js. Ensures zero per-token inference cost, complete data privacy, and exact alignment with `vector(512)` schema.
+* **2026-10-08 — Decoupled WebSocket Telemetry:** Created lightweight WebSocket layer at `/ws` using `ws` library. Eliminates client polling overhead while maintaining a decoupled event boundary (`publishIngestionEvent()`).
+* **2026-10-08 — pgvector Semantic Retrieval:** Built `PGVectorRetriever` subclassing LlamaIndex.TS `BaseRetriever` using pgvector cosine distance operator `<=>`.
+* **2026-10-08 — Dual-Layer Evidence Sufficiency & Citations:** Implemented pre-generation similarity gating (threshold `0.65`) combined with LLM sentinel refusal parsing (`INSUFFICIENT_EVIDENCE:`) to systematically mitigate hallucinations, refuse out-of-domain queries, and attach verifiable source citations.
+* **2026-10-08 — Ollama Provider Integration & Provider Symmetry:** Integrated local Ollama provider with installed model `hf.co/unsloth/Qwen3.5-0.8B-GGUF:Q4_K_M` alongside Groq and Gemini, featuring configurable environment selection and reasoning-stream support.
 
-The project should prioritize:
-
-```text
-Correctness
-    ↓
-Maintainability
-    ↓
-RAG Quality
-    ↓
-Security
-    ↓
-Observability
-    ↓
-Scalability
-```
-
-rather than prematurely optimizing for large-scale infrastructure.
-
----
-
-# End of Project Blueprint
+## 14.2 Future Scope (Phase 2+)
+Cloud object storage (S3/Supabase Storage), hybrid BM25 + vector search, cross-encoder reranking, query rewriting, conversation-aware retrieval, prompt versioning, streaming LLM responses over WebSockets/SSE, and automated RAG evaluation benchmarking.

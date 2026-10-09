@@ -8,7 +8,10 @@ import { and, asc, cosineDistance, eq, sql } from "drizzle-orm";
 import { db } from "../../database/client.js";
 import { documentChunks, documents } from "../../database/schema.js";
 import { getEmbeddingProvider } from "../../providers/embeddings/index.js";
-import { DEFAULT_RETRIEVAL_TOP_K } from "../../config/rag.js";
+import {
+  DEFAULT_MIN_SIMILARITY,
+  DEFAULT_RETRIEVAL_TOP_K,
+} from "../../config/rag.js";
 import type {
   RetrievedChunk,
   RetrieveOptions,
@@ -60,6 +63,9 @@ export const retrieveChunks = async (
 
   const similarityExpr = sql<number>`1 - (${cosineDistance(documentChunks.embedding, queryEmbedding)})`;
 
+  // Fetch a larger candidate pool to ensure topK unique chunks after deduplication
+  const fetchLimit = Math.max(topK * 3, 15);
+
   const rows = await db
     .select({
       id: documentChunks.id,
@@ -80,13 +86,25 @@ export const retrieveChunks = async (
       )
     )
     .orderBy(asc(cosineDistance(documentChunks.embedding, queryEmbedding)))
-    .limit(topK);
+    .limit(fetchLimit);
 
-  const minSim = options?.minSimilarity;
+  const minSim = options?.minSimilarity ?? DEFAULT_MIN_SIMILARITY;
+  const uniqueChunks: RetrievedChunk[] = [];
+  const seenContents = new Set<string>();
 
-  return rows
-    .filter((r) => minSim === undefined || Number(r.similarity) >= minSim)
-    .map((r) => ({
+  for (const r of rows) {
+    if (minSim !== undefined && Number(r.similarity) < minSim) {
+      continue;
+    }
+
+    // Deduplicate identical or whitespace-normalized chunks across pages
+    const normalized = r.content.trim().toLowerCase();
+    if (seenContents.has(normalized)) {
+      continue;
+    }
+    seenContents.add(normalized);
+
+    uniqueChunks.push({
       id: r.id,
       documentId: r.documentId,
       filename: r.filename,
@@ -95,5 +113,12 @@ export const retrieveChunks = async (
       chunkIndex: r.chunkIndex,
       similarity: Number(Number(r.similarity).toFixed(4)),
       metadata: (r.metadata as Record<string, unknown>) ?? {},
-    }));
+    });
+
+    if (uniqueChunks.length >= topK) {
+      break;
+    }
+  }
+
+  return uniqueChunks;
 };
