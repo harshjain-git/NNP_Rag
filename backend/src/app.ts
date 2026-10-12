@@ -3,6 +3,8 @@ import cors from "cors";
 import { CORS_ORIGIN } from "./config/env.js";
 import documentsRoutes from "./routes/documents.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
+import authRoutes from "./routes/auth.routes.js";
+import adminRoutes from "./routes/admin.routes.js";
 
 const app = express();
 
@@ -23,6 +25,8 @@ app.get("/", (_req, res) => {
   });
 });
 
+app.use("/api/auth", authRoutes);
+app.use("/api/admin", adminRoutes);
 app.use("/api/documents", documentsRoutes);
 app.use("/api/chat", chatRoutes);
 

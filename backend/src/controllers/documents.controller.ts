@@ -24,7 +24,10 @@ export const uploadDocumentController = async (
   }
 
   try {
-    const { uploaded, skipped } = await processUploadedFiles(files);
+    const { uploaded, skipped } = await processUploadedFiles(
+      files,
+      req.user?.id
+    );
 
     if (uploaded.length === 0) {
       res.status(409).json({

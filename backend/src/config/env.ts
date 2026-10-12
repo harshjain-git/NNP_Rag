@@ -124,6 +124,15 @@ export const validateJwtSecret = (
 const JWT_SECRET = validateJwtSecret(process.env.JWT_SECRET, NODE_ENV);
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
 
+// ============================================================================
+// 7. Initial Super Admin Seeding Configuration
+// ============================================================================
+const SUPER_ADMIN_NAME = process.env.SUPER_ADMIN_NAME || "Super Admin";
+const SUPER_ADMIN_EMAIL =
+  process.env.SUPER_ADMIN_EMAIL || "admin@nnt-rag.com";
+const SUPER_ADMIN_PASSWORD =
+  process.env.SUPER_ADMIN_PASSWORD || "Admin@12345";
+
 export {
   // Server & Environment
   PORT,
@@ -135,6 +144,11 @@ export {
   // Authentication & JWT Configuration
   JWT_SECRET,
   JWT_EXPIRES_IN,
+
+  // Initial Super Admin Seeding
+  SUPER_ADMIN_NAME,
+  SUPER_ADMIN_EMAIL,
+  SUPER_ADMIN_PASSWORD,
 
   // Text Embedding (Vector Search & Retrieval)
   EMBEDDING_PROVIDER,

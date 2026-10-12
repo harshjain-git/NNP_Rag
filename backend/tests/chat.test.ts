@@ -2,11 +2,14 @@ import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import type { Request, Response } from "express";
+import jwt from "jsonwebtoken";
 import app from "../src/app.js";
 import { chatController } from "../src/controllers/chat.controller.js";
 import { pool } from "../src/database/client.js";
 import { DEFAULT_MIN_SIMILARITY } from "../src/config/rag.js";
 import { retrieveChunks } from "../src/rag/retrieval/retriever.js";
+import { JWT_SECRET } from "../src/config/env.js";
+import { ROLE_NAMES } from "../src/database/schema.js";
 
 // Helper to create mock Express response
 interface MockResponse {
@@ -40,6 +43,19 @@ describe("RAG Chat API (POST /api/chat)", () => {
   let server: http.Server;
   let baseUrl: string;
 
+  const userToken = jwt.sign(
+    { sub: "test-user-id", role: ROLE_NAMES.USER },
+    JWT_SECRET
+  );
+  const adminToken = jwt.sign(
+    { sub: "test-admin-id", role: ROLE_NAMES.ADMIN },
+    JWT_SECRET
+  );
+  const superAdminToken = jwt.sign(
+    { sub: "test-super-admin-id", role: ROLE_NAMES.SUPER_ADMIN },
+    JWT_SECRET
+  );
+
   before(async () => {
     await new Promise<void>((resolve) => {
       server = http.createServer(app).listen(0, "127.0.0.1", () => {
@@ -58,11 +74,73 @@ describe("RAG Chat API (POST /api/chat)", () => {
     await pool.end();
   });
 
+  describe("Authentication & RBAC Access Control", () => {
+    it("should return 401 when Authorization header is missing", async () => {
+      const res = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: "Hello" }),
+      });
+
+      assert.equal(res.status, 401);
+      const data = (await res.json()) as { error: string };
+      assert.ok(data.error.includes("Missing authorization header"));
+    });
+
+    it("should return 401 when Bearer token is invalid or corrupted", async () => {
+      const res = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer invalid.token.payload",
+        },
+        body: JSON.stringify({ query: "Hello" }),
+      });
+
+      assert.equal(res.status, 401);
+      const data = (await res.json()) as { error: string };
+      assert.ok(data.error.includes("Invalid token"));
+    });
+
+    it("should allow ADMIN role to access chat endpoint", async () => {
+      const res = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({ query: "   " }), // Should pass auth and reach controller validation
+      });
+
+      assert.equal(res.status, 400);
+      const data = (await res.json()) as { error: string };
+      assert.equal(data.error, "Query cannot be empty");
+    });
+
+    it("should allow SUPER_ADMIN role to access chat endpoint", async () => {
+      const res = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${superAdminToken}`,
+        },
+        body: JSON.stringify({ query: "   " }), // Should pass auth and reach controller validation
+      });
+
+      assert.equal(res.status, 400);
+      const data = (await res.json()) as { error: string };
+      assert.equal(data.error, "Query cannot be empty");
+    });
+  });
+
   describe("HTTP Validation & Error Handling", () => {
     it("should return 400 when query is missing", async () => {
       const res = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${userToken}`,
+        },
         body: JSON.stringify({}),
       });
 
@@ -74,7 +152,10 @@ describe("RAG Chat API (POST /api/chat)", () => {
     it("should return 400 when query is not a string", async () => {
       const res = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${userToken}`,
+        },
         body: JSON.stringify({ query: 12345 }),
       });
 
@@ -86,7 +167,10 @@ describe("RAG Chat API (POST /api/chat)", () => {
     it("should return 400 when query is whitespace only", async () => {
       const res = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${userToken}`,
+        },
         body: JSON.stringify({ query: "   \n\t  " }),
       });
 
@@ -98,7 +182,10 @@ describe("RAG Chat API (POST /api/chat)", () => {
     it("should return 400 when documentId is not a valid UUID format", async () => {
       const res = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${userToken}`,
+        },
         body: JSON.stringify({
           query: "Summarize this document",
           documentId: "not-a-valid-uuid",
@@ -119,7 +206,10 @@ describe("RAG Chat API (POST /api/chat)", () => {
       // Non-existent UUID returns 0 chunks, triggering the sufficiency refusal gate
       const res = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${userToken}`,
+        },
         body: JSON.stringify({
           query: "What are the key findings?",
           documentId: "00000000-0000-0000-0000-000000000000",

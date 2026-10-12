@@ -11,6 +11,7 @@ export interface CreateDocumentInput {
   fileType: string;
   filePath: string;
   contentHash: string;
+  uploadedBy?: string | null;
 }
 
 export interface SkippedDocument {
@@ -50,7 +51,8 @@ export const findExistingHashes = async (
 };
 
 export const uploadDocuments = async (
-  inputs: CreateDocumentInput[]
+  inputs: CreateDocumentInput[],
+  uploadedBy?: string | null
 ): Promise<Document[]> => {
   if (inputs.length === 0) return [];
 
@@ -59,6 +61,7 @@ export const uploadDocuments = async (
     .values(
       inputs.map((input) => ({
         ...input,
+        uploadedBy: input.uploadedBy ?? uploadedBy ?? null,
         status: "uploaded",
       }))
     )
@@ -66,7 +69,8 @@ export const uploadDocuments = async (
 };
 
 export const processUploadedFiles = async (
-  files: Express.Multer.File[]
+  files: Express.Multer.File[],
+  uploadedBy?: string | null
 ): Promise<ProcessUploadResult> => {
   const skipped: SkippedDocument[] = [];
   const uniqueBatchFiles: { file: Express.Multer.File; hash: string }[] = [];
@@ -113,10 +117,11 @@ export const processUploadedFiles = async (
         fileType: path.extname(file.originalname).slice(1).toLowerCase(),
         filePath: path.relative(process.cwd(), file.path).replace(/\\/g, "/"),
         contentHash: hash,
+        uploadedBy: uploadedBy ?? null,
       })
     );
 
-    const uploaded = await uploadDocuments(documentInputs);
+    const uploaded = await uploadDocuments(documentInputs, uploadedBy);
 
     if (uploaded.length > 0) {
       enqueueDocuments(uploaded.map((doc) => doc.id));

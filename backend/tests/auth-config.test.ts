@@ -1,8 +1,13 @@
-import { describe, it } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
+import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { eq } from "drizzle-orm";
+import app from "../src/app.js";
+import { db, pool } from "../src/database/client.js";
+import { users } from "../src/database/schema.js";
 import {
   JWT_SECRET,
   JWT_EXPIRES_IN,
@@ -119,6 +124,238 @@ describe("Authentication Configuration Foundation", () => {
         pkg.devDependencies?.["@types/bcrypt"],
         "@types/bcrypt must be in devDependencies"
       );
+    });
+  });
+
+  describe("Authentication Endpoints (POST /api/auth/register & /api/auth/login)", () => {
+    let server: http.Server;
+    let baseUrl: string;
+    const testEmail = `test-user-${Date.now()}@example.com`;
+    const testPassword = "securePassword123";
+    const testName = "Test User";
+
+    before(async () => {
+      await new Promise<void>((resolve) => {
+        server = http.createServer(app).listen(0, "127.0.0.1", () => {
+          const addr = server.address() as { port: number };
+          baseUrl = `http://127.0.0.1:${addr.port}`;
+          resolve();
+        });
+      });
+    });
+
+    after(async () => {
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+      // Clean up test user from database
+      await db.delete(users).where(eq(users.email, testEmail));
+    });
+
+    it("should return 400 when name is missing or empty in registration", async () => {
+      const res = await fetch(`${baseUrl}/api/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: testEmail, password: testPassword }),
+      });
+      assert.equal(res.status, 400);
+      const data = (await res.json()) as { error: string };
+      assert.equal(data.error, "Name is required");
+    });
+
+    it("should return 400 when email is invalid in registration", async () => {
+      const res = await fetch(`${baseUrl}/api/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: testName, email: "invalid-email", password: testPassword }),
+      });
+      assert.equal(res.status, 400);
+      const data = (await res.json()) as { error: string };
+      assert.equal(data.error, "Valid email is required");
+    });
+
+    it("should return 400 when password is shorter than 8 characters", async () => {
+      const res = await fetch(`${baseUrl}/api/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: testName, email: testEmail, password: "short" }),
+      });
+      assert.equal(res.status, 400);
+      const data = (await res.json()) as { error: string };
+      assert.equal(data.error, "Password must be at least 8 characters long");
+    });
+
+    it("should register user, assign USER role server-side, and return token and safe user details", async () => {
+      const res = await fetch(`${baseUrl}/api/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // Try passing role: "SUPER_ADMIN" to ensure client-supplied role is ignored
+        body: JSON.stringify({
+          name: testName,
+          email: testEmail,
+          password: testPassword,
+          role: "SUPER_ADMIN",
+        }),
+      });
+
+      assert.equal(res.status, 201);
+      const data = (await res.json()) as {
+        user: { id: string; name: string; email: string; role: string; passwordHash?: string };
+        token: string;
+      };
+
+      assert.ok(data.token && data.token.length > 0);
+      assert.equal(data.user.name, testName);
+      assert.equal(data.user.email, testEmail);
+      assert.equal(data.user.role, "USER"); // strictly server-assigned
+      assert.equal(data.user.passwordHash, undefined); // password hash never exposed
+    });
+
+    it("should return 409 conflict when registering with already existing email", async () => {
+      const res = await fetch(`${baseUrl}/api/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Another Name",
+          email: testEmail,
+          password: testPassword,
+        }),
+      });
+
+      assert.equal(res.status, 409);
+      const data = (await res.json()) as { error: string };
+      assert.equal(data.error, "Email is already registered");
+    });
+
+    it("should return 400 when email or password is missing in login", async () => {
+      const res = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: testEmail }),
+      });
+      assert.equal(res.status, 400);
+    });
+
+    it("should return 401 with generic error for non-existent email in login", async () => {
+      const res = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: "non-existent@example.com",
+          password: testPassword,
+        }),
+      });
+
+      assert.equal(res.status, 401);
+      const data = (await res.json()) as { error: string };
+      assert.equal(data.error, "Invalid email or password");
+    });
+
+    it("should return 401 with generic error for incorrect password in login", async () => {
+      const res = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: testEmail,
+          password: "wrongPassword123",
+        }),
+      });
+
+      assert.equal(res.status, 401);
+      const data = (await res.json()) as { error: string };
+      assert.equal(data.error, "Invalid email or password");
+    });
+
+    it("should log in successfully with valid credentials and return JWT token and safe user", async () => {
+      const res = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: testEmail,
+          password: testPassword,
+        }),
+      });
+
+      assert.equal(res.status, 200);
+      const data = (await res.json()) as {
+        user: { id: string; name: string; email: string; role: string; passwordHash?: string };
+        token: string;
+      };
+
+      assert.ok(data.token && data.token.length > 0);
+      assert.equal(data.user.email, testEmail);
+      assert.equal(data.user.role, "USER");
+      assert.equal(data.user.passwordHash, undefined);
+    });
+  });
+
+  describe("Super Admin Seeding & Authentication", () => {
+    let server: http.Server;
+    let baseUrl: string;
+    const adminEmail = `seeded-admin-${Date.now()}@example.com`;
+    const adminPassword = "SuperAdminPassword123!";
+    const adminName = "System Super Admin";
+
+    before(async () => {
+      await new Promise<void>((resolve) => {
+        server = http.createServer(app).listen(0, "127.0.0.1", () => {
+          const addr = server.address() as { port: number };
+          baseUrl = `http://127.0.0.1:${addr.port}`;
+          resolve();
+        });
+      });
+    });
+
+    after(async () => {
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+      // Clean up test seeded admin user
+      await db.delete(users).where(eq(users.email, adminEmail));
+      await pool.end();
+    });
+
+    it("should seed a new SUPER_ADMIN user idempotently", async () => {
+      const { seedSuperAdmin } = await import("../src/database/seed.js");
+      const result = await seedSuperAdmin({
+        name: adminName,
+        email: adminEmail,
+        password: adminPassword,
+      });
+
+      assert.ok(result.user?.id);
+      assert.equal(result.user.email, adminEmail);
+      assert.equal(result.created, true);
+
+      // Re-running should be idempotent
+      const secondRun = await seedSuperAdmin({
+        name: adminName,
+        email: adminEmail,
+        password: adminPassword,
+      });
+      assert.equal(secondRun.created, false);
+      assert.equal(secondRun.elevated, false);
+    });
+
+    it("should allow seeded SUPER_ADMIN to log in and receive SUPER_ADMIN role claim", async () => {
+      const res = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: adminEmail,
+          password: adminPassword,
+        }),
+      });
+
+      assert.equal(res.status, 200);
+      const data = (await res.json()) as {
+        user: { id: string; email: string; role: string };
+        token: string;
+      };
+
+      assert.ok(data.token && data.token.length > 0);
+      assert.equal(data.user.email, adminEmail);
+      assert.equal(data.user.role, "SUPER_ADMIN");
     });
   });
 });

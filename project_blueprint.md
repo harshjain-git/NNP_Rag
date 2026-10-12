@@ -120,7 +120,7 @@ NNT_Rag/
 * **`routes/`:** Thin HTTP routing layer (`documents.routes.ts`, `chat.routes.ts` [implemented]; `auth.routes.ts`, `prompts.routes.ts` [planned]).
 * **`controllers/`:** Extracts request parameters, handles HTTP status codes, and delegates execution to services (`documents.controller.ts`, `chat.controller.ts` [implemented]).
 * **`services/`:** Implements core business logic, transactional database persistence, and orchestration (`document.service.ts` [implemented]).
-* **`middleware/`:** Houses upload handling (`upload.middleware.ts` [implemented]), and planned authentication guards (`auth.middleware.ts`), role checking (`role.middleware.ts`), and centralized error handling (`error.middleware.ts`).
+* **`middleware/`:** Houses upload handling (`upload.middleware.ts` [implemented]), authentication guard (`auth.middleware.ts` [implemented]), role checking (`role.middleware.ts` [implemented]), and planned centralized error handling (`error.middleware.ts`).
 * **`validators/` [Planned]:** Zod schemas validating HTTP request bodies, query strings, and path parameters before execution.
 * **`providers/` [Implemented]:** Vendor-agnostic abstractions isolating LLM generation and embedding models behind clean contracts.
 * **`rag/` [Implemented]:** Houses the ingestion, retrieval, and generation engines implementing core RAG capabilities.
@@ -145,15 +145,18 @@ $$\text{HTTP Request} \longrightarrow \text{Route} \longrightarrow \text{Middlew
 | Category | Endpoint | Method | Auth / Role | Input Payload | Output / Response | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **System** | `/` | `GET` | Public | None | `{ message: string }` | **Implemented** (Public health check) |
-| **Documents**| `/api/documents/upload` | `POST` | Currently Unauthenticated (Planned `ADMIN`) | `multipart/form-data` (`files[]`) | `{ uploaded: Document[], skipped: SkippedDoc[] }` | **Implemented** (Active route; auth planned) |
-| | `/api/documents` | `GET` | Currently Unauthenticated (Planned `USER`) | None | `Document[]` | **Implemented** (Active route; auth planned) |
-| | `/api/documents/:id` | `GET` | Currently Unauthenticated (Planned `USER`) | None | `Document & { chunkCount: number }` | **Implemented** (Active route; auth planned) |
-| | `/api/documents/:id` | `DELETE`| Currently Unauthenticated (Planned `ADMIN`) | None | `{ message: string, documentId: string, filename: string }` | **Implemented** (Active route; auth planned) |
-| **Auth** | `/api/auth/register` | `POST` | Public | `{ email, password, name }` | `{ user: { id, email, role }, token }` | Planned (Milestone 2) |
-| | `/api/auth/login` | `POST` | Public | `{ email, password }` | `{ user: { id, email, role }, token }` | Planned (Milestone 2) |
-| **Chat** | `/api/chat` | `POST` | Currently Unauthenticated (Planned `USER`) | `{ query, documentId? }` | `{ answer, evidenceSufficient, citations, modelName, providerName }` | **Implemented** (Active route; auth & session persistence planned) |
+| **Documents**| `/api/documents/upload` | `POST` | `ADMIN` / `SUPER_ADMIN` | `multipart/form-data` (`files[]`) | `{ uploaded: Document[], skipped: SkippedDoc[] }` | **Implemented** (JWT + RBAC protected) |
+| | `/api/documents` | `GET` | `USER` / `ADMIN` / `SUPER_ADMIN` | None | `Document[]` | **Implemented** (JWT + RBAC protected) |
+| | `/api/documents/:id` | `GET` | `USER` / `ADMIN` / `SUPER_ADMIN` | None | `Document & { chunkCount: number }` | **Implemented** (JWT + RBAC protected) |
+| | `/api/documents/:id` | `DELETE`| `ADMIN` / `SUPER_ADMIN` | None | `{ message: string, documentId: string, filename: string }` | **Implemented** (JWT + RBAC protected) |
+| **Auth** | `/api/auth/register` | `POST` | Public | `{ email, password, name }` | `{ user: { id, email, role }, token }` | **Implemented** (Active route) |
+| | `/api/auth/login` | `POST` | Public | `{ email, password }` | `{ user: { id, email, role }, token }` | **Implemented** (Active route) |
+| **Chat** | `/api/chat` | `POST` | `USER` / `ADMIN` / `SUPER_ADMIN` | `{ query, documentId? }` | `{ answer, evidenceSufficient, citations, modelName, providerName }` | **Implemented** (JWT + RBAC protected) |
 | | `/api/conversations` | `GET` | `USER` | `?limit=20&offset=0` | `Conversation[]` | Planned (Milestone 2) |
 | | `/api/conversations/:id` | `GET` | `USER` | None | `Conversation & { messages: Message[] }` | Planned (Milestone 2) |
+| **Admin** | `/api/admin/users` | `GET` | `SUPER_ADMIN` | None | `{ users: SafeUser[] }` | **Implemented** (JWT + RBAC protected) |
+| | `/api/admin/users/:id/role` | `PATCH` | `SUPER_ADMIN` | `{ role: RoleName }` | `{ message: string, user: SafeUser }` | **Implemented** (JWT + RBAC protected) |
+| | `/api/admin/users` | `POST` | `SUPER_ADMIN` | `{ name, email, password, role }` | `{ message: string, user: SafeUser }` | **Implemented** (JWT + RBAC protected) |
 | **Prompts** | `/api/prompts` | `GET` | `ADMIN` | None | `Prompt[]` | Planned (Milestone 2) |
 | | `/api/prompts` | `POST` | `ADMIN` | `{ name, content, type }` | `Prompt` | Planned (Milestone 2) |
 | | `/api/prompts/:id` | `PUT` | `ADMIN` | `{ content?, status? }` | `Prompt` | Planned (Milestone 2) |
@@ -596,7 +599,7 @@ The security architecture specifies requirements for the planned authentication 
 | **Realtime WebSockets** | **Implemented** | Mounted on `/ws`, broadcasts 6 ingestion lifecycle events. |
 | **Chat HTTP Endpoint** | **Implemented** | Express endpoint `POST /api/chat` with input validation, error handling, evidence sufficiency gating, and citations. |
 | **Conversation Persistence**| **Planned** | Database tables (`conversations`, `messages`), multi-turn session persistence service. |
-| **User Authentication & RBAC** | **Planned** | Database tables (`users`, `roles`), bcrypt hashing, JWT issuance and route protection middleware. |
+| **User Authentication & RBAC** | **Implemented** | Registration & login active with bcrypt (10 rounds), JWT issuance, and route protection middleware (`auth.middleware.ts`, `role.middleware.ts`). |
 | **Prompt Management API** | **Planned** | Database table (`prompts`), admin CRUD endpoints for system/RAG prompt overrides. |
 | **Next.js Frontend UI** | **Planned** | Initial Next.js starter setup; document upload UI and chat interface pending. |
 
@@ -611,12 +614,14 @@ The security architecture specifies requirements for the planned authentication 
 - [x] **Multi-Provider LLM Integration:** Flexible support for Groq, Gemini, and local Ollama.
 - [x] **Build Verification:** Zero TypeScript compilation errors (`npm run build`).
 
-### Milestone 2: Authentication, Chat Persistence & Administration (Planned)
-- [ ] **Authentication & RBAC:** User registration/login with bcrypt hashing, stateless JWT issuance, and server-side role middleware on protected routes.
+### Milestone 2: Authentication, Chat Persistence & Administration (In Progress)
+- [x] **Authentication:** User registration/login with bcrypt hashing (10 salt rounds), server-side `USER` role assignment, stateless JWT issuance, and generic credential failure responses.
+- [x] **Super Admin Bootstrapping:** Idempotent database seeding (`npm run db:seed`) creates canonical roles and initial `SUPER_ADMIN` account with bcrypt-hashed credentials configured via environment variables.
+- [x] **RBAC Route Protection:** Server-side role middleware on protected endpoints (`auth.middleware.ts`, `role.middleware.ts`).
 - [ ] **Conversational History:** Multi-turn conversation sessions and message persistence in PostgreSQL (`conversations`, `messages`).
 - [ ] **Chat HTTP Route:** Express endpoint `/api/chat` orchestrating `generateAnswer` with conversation persistence.
 - [ ] **Prompt Administration:** Database-backed prompt storage and administrative CRUD endpoints (`/api/prompts`).
-- [ ] **Document Lifecycle Management:** Document deletion endpoint (`DELETE /api/documents/:id`) with cascading chunk removal.
+- [x] **Document Lifecycle Management:** Document deletion endpoint (`DELETE /api/documents/:id`) with cascading chunk removal.
 
 ### Milestone 3: Next.js Frontend Web Application (Planned)
 - [ ] **Document Upload Interface:** Drag-and-drop file upload with real-time WebSocket progress bars.
