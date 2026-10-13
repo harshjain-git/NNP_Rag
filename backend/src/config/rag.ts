@@ -15,6 +15,11 @@ export const DEFAULT_MIN_CHUNK_CHARS = 300;
 export const DEFAULT_INSUFFICIENT_EVIDENCE_MESSAGE =
   "I cannot answer this question based on the provided documents because there is insufficient relevant information available.";
 
+export const MAX_ACTIVE_DOCUMENTS_PER_ADMIN = 10;
+export const MAX_MESSAGES_PER_CONVERSATION = 50;
+export const CONVERSATION_WARNING_THRESHOLDS = [8, 5] as const;
+export const ROLLOVER_QA_PAIRS_COUNT = 8;
+export const CONVERSATION_TITLE_MAX_LENGTH = 80;
 
 export interface RagChunkingConfig {
   structuralTarget: number;

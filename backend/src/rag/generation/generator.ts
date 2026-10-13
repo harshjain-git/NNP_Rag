@@ -1,17 +1,19 @@
-import { retrieveChunks } from "../retrieval/retriever.js";
+import { retrieveChunks, chunkRetriever } from "../retrieval/retriever.js";
 import type { RetrievedChunk, RetrieveOptions } from "../retrieval/types.js";
 import { getLLMProvider } from "../../providers/llm/index.js";
 import {
   DEFAULT_INSUFFICIENT_EVIDENCE_MESSAGE,
   DEFAULT_MIN_SUFFICIENCY_SCORE,
 } from "../../config/rag.js";
-import { buildRAGPrompt } from "./prompt.js";
+import { buildRAGPrompt, DEFAULT_RAG_SYSTEM_PROMPT } from "./prompt.js";
 import { checkEvidenceSufficiency } from "./sufficiency.js";
+import { promptsService } from "../../services/prompts.service.js";
 import type {
   Citation,
   GenerateAnswerOptions,
   GenerateAnswerResult,
 } from "./types.js";
+
 
 const extractCitations = (
   answerText: string,
@@ -85,7 +87,8 @@ export const generateAnswer = async (
   if (options?.minSimilarity !== undefined) retrieveOpts.minSimilarity = options.minSimilarity;
   if (options?.embeddingProvider !== undefined) retrieveOpts.embeddingProvider = options.embeddingProvider;
 
-  const retrievedChunks = await retrieveChunks(trimmedQuery, retrieveOpts);
+  const retrieveFn = options?.retriever ?? chunkRetriever.retrieveChunks;
+  const retrievedChunks = await retrieveFn(trimmedQuery, retrieveOpts);
 
   // 2. Pre-generation evidence sufficiency check
   const minScore =
@@ -107,16 +110,29 @@ export const generateAnswer = async (
     return result;
   }
 
-  // 3. Build strictly grounded prompt
-  const { systemPrompt, userPrompt } = buildRAGPrompt(
+  // 3. Resolve system prompt (explicit override > active DB prompt > default fallback)
+  let systemPrompt = options?.systemPrompt;
+  if (!systemPrompt) {
+    try {
+      const activePrompt = await promptsService.getActivePrompt("system");
+      systemPrompt = activePrompt?.content || DEFAULT_RAG_SYSTEM_PROMPT;
+    } catch (error) {
+      console.warn("Failed to retrieve active system prompt, falling back to default:", error);
+      systemPrompt = DEFAULT_RAG_SYSTEM_PROMPT;
+    }
+  }
+
+  // 4. Build strictly grounded prompt
+  const { systemPrompt: finalSystemPrompt, userPrompt } = buildRAGPrompt(
     trimmedQuery,
     retrievedChunks,
-    options?.systemPrompt
+    systemPrompt,
+    options?.conversationHistory
   );
 
-  // 4. Generate answer via configured LLM provider
+  // 5. Generate answer via configured LLM provider
   const rawResponse = await provider.generate(userPrompt, {
-    systemPrompt,
+    systemPrompt: finalSystemPrompt,
     temperature: options?.temperature ?? 0.1,
     maxTokens: options?.maxTokens ?? 1024,
   });

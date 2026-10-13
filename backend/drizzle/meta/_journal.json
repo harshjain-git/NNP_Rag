@@ -15,6 +15,20 @@
       "when": 1791551888690,
       "tag": "0001_perfect_post",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791889369853,
+      "tag": "0002_eminent_grim_reaper",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791896638968,
+      "tag": "0003_eager_deathstrike",
+      "breakpoints": true
     }
   ]
 }

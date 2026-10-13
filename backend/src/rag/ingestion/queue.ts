@@ -49,6 +49,16 @@ export class IngestionQueue {
     }
   }
 
+  public cancel(documentId: string): boolean {
+    const index = this.queue.indexOf(documentId);
+    if (index !== -1) {
+      this.queue.splice(index, 1);
+      this.pendingOrRunning.delete(documentId);
+      return true;
+    }
+    return false;
+  }
+
   public getStatus(): IngestionQueueStatus {
     return {
       queuedCount: this.queue.length,
@@ -114,4 +124,8 @@ export const getIngestionQueueStatus = (): IngestionQueueStatus => {
 
 export const waitForIngestionQueueIdle = (): Promise<void> => {
   return ingestionQueue.waitForIdle();
+};
+
+export const cancelIngestion = (documentId: string): boolean => {
+  return ingestionQueue.cancel(documentId);
 };

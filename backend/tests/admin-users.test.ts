@@ -351,4 +351,141 @@ describe("Super Admin User Management APIs (/api/admin/users)", () => {
       assert.equal(data.user.role, ROLE_NAMES.USER);
     });
   });
+
+  describe("DELETE /api/admin/users/:id", () => {
+    let deletableUser: { id: string; email: string };
+
+    before(async () => {
+      const email = `delete-target-${Date.now()}@example.com`;
+      cleanupEmails.push(email);
+
+      const res = await fetch(`${baseUrl}/api/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Deletable User",
+          email,
+          password: "UserPassword123!",
+        }),
+      });
+      const data = (await res.json()) as { user: { id: string; email: string } };
+      deletableUser = data.user;
+    });
+
+    it("should return 401 when unauthenticated", async () => {
+      const res = await fetch(`${baseUrl}/api/admin/users/${deletableUser.id}`, {
+        method: "DELETE",
+      });
+      assert.equal(res.status, 401);
+    });
+
+    it("should return 403 when called by standard USER or ADMIN", async () => {
+      const userRes = await fetch(`${baseUrl}/api/admin/users/${deletableUser.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${userToken}` },
+      });
+      assert.equal(userRes.status, 403);
+
+      const adminRes = await fetch(`${baseUrl}/api/admin/users/${deletableUser.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      assert.equal(adminRes.status, 403);
+    });
+
+    it("should return 400 when user ID format is invalid", async () => {
+      const res = await fetch(`${baseUrl}/api/admin/users/invalid-uuid-format`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${superAdminToken}` },
+      });
+      assert.equal(res.status, 400);
+      const data = (await res.json()) as { error: string };
+      assert.ok(data.error.includes("Invalid user ID format"));
+    });
+
+    it("should return 404 when target user does not exist", async () => {
+      const nonExistentId = "00000000-0000-0000-0000-000000000000";
+      const res = await fetch(`${baseUrl}/api/admin/users/${nonExistentId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${superAdminToken}` },
+      });
+      assert.equal(res.status, 404);
+      const data = (await res.json()) as { error: string };
+      assert.equal(data.error, "User not found");
+    });
+
+    it("should return 400 when Super Admin attempts self-deletion", async () => {
+      const res = await fetch(`${baseUrl}/api/admin/users/${superAdminId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${superAdminToken}` },
+      });
+      assert.equal(res.status, 400);
+      const data = (await res.json()) as { error: string };
+      assert.ok(data.error.includes("Cannot delete your own account"));
+    });
+
+    it("should successfully delete a registered user", async () => {
+      const res = await fetch(`${baseUrl}/api/admin/users/${deletableUser.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${superAdminToken}` },
+      });
+
+      assert.equal(res.status, 200);
+      const data = (await res.json()) as {
+        message: string;
+        user: { id: string; email: string; role: string };
+      };
+      assert.equal(data.message, "User deleted successfully");
+      assert.equal(data.user.id, deletableUser.id);
+      assert.equal(data.user.email, deletableUser.email);
+
+      // Verify the deleted user cannot log in anymore
+      const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: deletableUser.email,
+          password: "UserPassword123!",
+        }),
+      });
+      assert.equal(loginRes.status, 401);
+    });
+
+    it("should prevent deleting the last Super Admin in the system", async () => {
+      const { deleteUser } = await import("../src/services/admin.service.js");
+      const [superAdminRole] = await db
+        .select({ id: roles.id })
+        .from(roles)
+        .where(eq(roles.name, ROLE_NAMES.SUPER_ADMIN))
+        .limit(1);
+
+      const solitarySuperAdminId = crypto.randomUUID();
+      const solitaryEmail = `solitary-sa-${Date.now()}@example.com`;
+      cleanupEmails.push(solitaryEmail);
+      await db.insert(users).values({
+        id: solitarySuperAdminId,
+        name: "Solitary SA",
+        email: solitaryEmail,
+        passwordHash: "dummyHash",
+        roleId: superAdminRole!.id,
+      });
+
+      // Deleting when multiple super admins exist succeeds
+      const deleteResult = await deleteUser(superAdminId, solitarySuperAdminId);
+      assert.ok("user" in deleteResult);
+
+      // Verify last super admin safeguard
+      const remainingSAs = await db
+        .select({ id: users.id })
+        .from(users)
+        .innerJoin(roles, eq(users.roleId, roles.id))
+        .where(eq(roles.name, ROLE_NAMES.SUPER_ADMIN));
+
+      if (remainingSAs.length === 1) {
+        const fakeRequesterId = crypto.randomUUID();
+        const res = await deleteUser(fakeRequesterId, remainingSAs[0]!.id);
+        assert.deepEqual(res, { error: "lastSuperAdmin" });
+      }
+    });
+  });
 });

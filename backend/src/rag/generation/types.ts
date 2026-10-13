@@ -24,7 +24,10 @@ export interface GenerateAnswerOptions extends RetrieveOptions {
   temperature?: number | undefined;
   maxTokens?: number | undefined;
   llmProvider?: LLMProvider | undefined;
+  conversationHistory?: Array<{ role: string; content: string }> | undefined;
+  retriever?: ((query: string, options?: RetrieveOptions) => Promise<RetrievedChunk[]>) | undefined;
 }
+
 
 export interface GenerateAnswerResult {
   answer: string;

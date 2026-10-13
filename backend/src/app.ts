@@ -5,6 +5,8 @@ import documentsRoutes from "./routes/documents.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
 import authRoutes from "./routes/auth.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
+import conversationRoutes from "./routes/conversation.routes.js";
+import promptsRoutes from "./routes/prompts.routes.js";
 
 const app = express();
 
@@ -29,5 +31,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/documents", documentsRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/conversations", conversationRoutes);
+app.use("/api/prompts", promptsRoutes);
 
-export default app;
+export default app;

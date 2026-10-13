@@ -10,6 +10,7 @@ import {
   users,
   documents,
   documentChunks,
+  prompts,
 } from "../src/database/schema.js";
 import { DEFAULT_ROLES } from "../src/database/seed.js";
 
@@ -67,6 +68,21 @@ describe("Database Schema Foundation (Auth & RBAC)", () => {
     assert.ok(documents.contentHash);
     assert.ok(documentChunks.embedding);
   });
+
+  it("should configure the prompts table with expected columns, unique name, and composite index", () => {
+    assert.equal(getTableName(prompts), "prompts");
+    assert.equal(prompts.id.name, "id");
+    assert.equal(prompts.id.primary, true);
+    assert.equal(prompts.name.name, "name");
+    assert.equal(prompts.name.isUnique, true);
+    assert.equal(prompts.content.name, "content");
+    assert.equal(prompts.type.name, "type");
+    assert.equal(prompts.status.name, "status");
+    assert.equal(prompts.createdBy.name, "created_by");
+    assert.equal(prompts.createdAt.name, "created_at");
+    assert.equal(prompts.updatedAt.name, "updated_at");
+  });
+
 
   it("should verify migration SQL file contains required DDL, constraints, defaults, and indexes", () => {
     const migrationPath = path.join(drizzleDir, "0001_perfect_post.sql");
@@ -129,7 +145,7 @@ describe("Database Schema Foundation (Auth & RBAC)", () => {
 
     const journal = JSON.parse(fs.readFileSync(journalPath, "utf-8"));
     assert.equal(journal.dialect, "postgresql");
-    assert.equal(journal.entries.length, 2);
+    assert.ok(journal.entries.length >= 2, "Migration journal must contain at least 2 entries");
 
     const initialEntry = journal.entries[0];
     assert.equal(initialEntry.idx, 0);

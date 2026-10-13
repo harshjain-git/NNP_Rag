@@ -3,6 +3,7 @@ import {
   listUsersController,
   updateUserRoleController,
   createUserByAdminController,
+  deleteUserController,
 } from "../controllers/admin.controller.js";
 import { authenticate } from "../middleware/auth.middleware.js";
 import { requireRole } from "../middleware/role.middleware.js";
@@ -21,5 +22,8 @@ router.patch("/users/:id/role", updateUserRoleController);
 
 // POST /api/admin/users - Directly provision user with specified role
 router.post("/users", createUserByAdminController);
+
+// DELETE /api/admin/users/:id - Delete user with safeguards
+router.delete("/users/:id", deleteUserController);
 
 export default router;

@@ -103,3 +103,98 @@ export type Document = typeof documents.$inferSelect;
 export type NewDocument = typeof documents.$inferInsert;
 export type DocumentChunk = typeof documentChunks.$inferSelect;
 export type NewDocumentChunk = typeof documentChunks.$inferInsert;
+
+// ============================================================================
+// 3. Conversations & Messages (Multi-Turn Chat History)
+// ============================================================================
+
+export const conversations = pgTable(
+  "conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("idx_conversations_user_id").on(table.userId),
+  ]
+);
+
+export const messages = pgTable(
+  "messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    role: text("role").notNull(), // 'user' | 'assistant'
+    content: text("content").notNull(),
+    citations: jsonb("citations").default([]),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("idx_messages_conversation_id").on(table.conversationId),
+  ]
+);
+
+export type Conversation = typeof conversations.$inferSelect;
+export type NewConversation = typeof conversations.$inferInsert;
+export type Message = typeof messages.$inferSelect;
+export type NewMessage = typeof messages.$inferInsert;
+
+// ============================================================================
+// 4. Prompts (Admin Prompt Management)
+// ============================================================================
+
+export const PROMPT_TYPES = {
+  SYSTEM: "system",
+  RAG: "rag",
+  CITATION: "citation",
+} as const;
+
+export type PromptType = (typeof PROMPT_TYPES)[keyof typeof PROMPT_TYPES];
+
+export const PROMPT_STATUSES = {
+  ACTIVE: "active",
+  DRAFT: "draft",
+} as const;
+
+export type PromptStatus = (typeof PROMPT_STATUSES)[keyof typeof PROMPT_STATUSES];
+
+export const prompts = pgTable(
+  "prompts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull().unique(),
+    content: text("content").notNull(),
+    type: text("type").notNull().default("system"),
+    status: text("status").notNull().default("active"),
+    createdBy: uuid("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("idx_prompts_type_status").on(table.type, table.status),
+  ]
+);
+
+export type Prompt = typeof prompts.$inferSelect;
+export type NewPrompt = typeof prompts.$inferInsert;
+
+

@@ -1,10 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import crypto from "node:crypto";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../database/client.js";
-import { documents, type Document } from "../database/schema.js";
-import { enqueueDocuments } from "../rag/ingestion/index.js";
+import { documents, ROLE_NAMES, type Document } from "../database/schema.js";
+import { enqueueDocuments, cancelIngestion } from "../rag/ingestion/index.js";
+import { computeFileHash, deleteFile, deleteFiles } from "../utils/file.js";
+import { MAX_ACTIVE_DOCUMENTS_PER_ADMIN } from "../config/rag.js";
+
+export { MAX_ACTIVE_DOCUMENTS_PER_ADMIN };
 
 export interface CreateDocumentInput {
   filename: string;
@@ -14,40 +17,52 @@ export interface CreateDocumentInput {
   uploadedBy?: string | null;
 }
 
-export interface SkippedDocument {
-  filename: string;
-  reason: string;
-}
+export type SkippedDocument = { filename: string; reason: string };
 
-export interface ProcessUploadResult {
-  uploaded: Document[];
-  skipped: SkippedDocument[];
-}
+export type ProcessUploadResult =
+  | { uploaded: Document[]; skipped: SkippedDocument[] }
+  | { error: "limitExceeded"; message: string; activeCount: number; attemptedCount: number };
 
-const computeFileHash = async (filePath: string): Promise<string> => {
-  const buffer = await fs.readFile(filePath);
-  return crypto.createHash("sha256").update(buffer).digest("hex");
-};
+export type DeleteDocumentResult =
+  | { success: true; document: Document }
+  | { error: "notFound" | "forbidden" }
+  | { error: "cleanupFailed"; details: string };
 
-const deleteFile = async (filePath: string): Promise<void> => {
+const locks = new Map<string, Promise<void>>();
+
+export const withAdminUploadLock = async <T>(
+  adminId: string,
+  fn: () => Promise<T>
+): Promise<T> => {
+  const prev = locks.get(adminId) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((r) => { release = r; });
+  locks.set(adminId, prev.then(() => current, () => current));
+
   try {
-    await fs.unlink(filePath);
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      console.error(`Failed to delete file ${filePath}:`, err);
-    }
+    await prev;
+    return await fn();
+  } finally {
+    release();
+    if (locks.get(adminId) === current) locks.delete(adminId);
   }
 };
 
-export const findExistingHashes = async (
-  hashes: string[]
-): Promise<string[]> => {
+export const getActiveDocumentCount = async (adminId: string): Promise<number> => {
+  const [res] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(documents)
+    .where(and(eq(documents.uploadedBy, adminId), ne(documents.status, "failed")));
+  return res?.count ?? 0;
+};
+
+export const findExistingHashes = async (hashes: string[]): Promise<string[]> => {
   if (hashes.length === 0) return [];
-  const existing = await db
-    .select({ contentHash: documents.contentHash })
+  const rows = await db
+    .select({ hash: documents.contentHash })
     .from(documents)
     .where(inArray(documents.contentHash, hashes));
-  return existing.map((doc) => doc.contentHash);
+  return rows.map((r) => r.hash);
 };
 
 export const uploadDocuments = async (
@@ -55,8 +70,7 @@ export const uploadDocuments = async (
   uploadedBy?: string | null
 ): Promise<Document[]> => {
   if (inputs.length === 0) return [];
-
-  return await db
+  return db
     .insert(documents)
     .values(
       inputs.map((input) => ({
@@ -72,104 +86,110 @@ export const processUploadedFiles = async (
   files: Express.Multer.File[],
   uploadedBy?: string | null
 ): Promise<ProcessUploadResult> => {
-  const skipped: SkippedDocument[] = [];
-  const uniqueBatchFiles: { file: Express.Multer.File; hash: string }[] = [];
-  const seenHashesInBatch = new Set<string>();
-
-  // 1. Filter out duplicates within the current batch
-  for (const file of files) {
-    const hash = await computeFileHash(file.path);
-    if (seenHashesInBatch.has(hash)) {
-      await deleteFile(file.path);
-      skipped.push({
-        filename: file.originalname,
-        reason: "Duplicate content in batch",
-      });
-      continue;
-    }
-    seenHashesInBatch.add(hash);
-    uniqueBatchFiles.push({ file, hash });
+  if (!uploadedBy) {
+    await deleteFiles(files);
+    throw new Error("Uploader identity is required to enforce document limits");
   }
 
-  // 2. Filter out duplicates that already exist in the database
-  const candidateHashes = uniqueBatchFiles.map((item) => item.hash);
-  const existingHashes = new Set(await findExistingHashes(candidateHashes));
-
-  const validFilesToInsert: { file: Express.Multer.File; hash: string }[] = [];
-
-  for (const item of uniqueBatchFiles) {
-    if (existingHashes.has(item.hash)) {
-      await deleteFile(item.file.path);
-      skipped.push({
-        filename: item.file.originalname,
-        reason: "Duplicate content already exists",
-      });
-    } else {
-      validFilesToInsert.push(item);
+  return withAdminUploadLock(uploadedBy, async () => {
+    const activeCount = await getActiveDocumentCount(uploadedBy);
+    if (activeCount >= MAX_ACTIVE_DOCUMENTS_PER_ADMIN) {
+      await deleteFiles(files);
+      return {
+        error: "limitExceeded",
+        message: `Maximum active document limit of ${MAX_ACTIVE_DOCUMENTS_PER_ADMIN} reached. You currently have ${activeCount} active document(s).`,
+        activeCount,
+        attemptedCount: files.length,
+      };
     }
-  }
 
-  // 3. Persist valid new files and enqueue for background ingestion
-  try {
-    const documentInputs: CreateDocumentInput[] = validFilesToInsert.map(
-      ({ file, hash }) => ({
+    const hashed = await Promise.all(
+      files.map(async (file) => ({ file, hash: await computeFileHash(file.path) }))
+    );
+    const existingHashes = new Set(await findExistingHashes(hashed.map((h) => h.hash)));
+    const seen = new Set<string>();
+    const validFiles: typeof hashed = [];
+    const skipped: SkippedDocument[] = [];
+
+    for (const item of hashed) {
+      const reason = seen.has(item.hash)
+        ? "Duplicate content in batch"
+        : existingHashes.has(item.hash)
+        ? "Duplicate content already exists"
+        : null;
+      if (reason) {
+        await deleteFile(item.file.path);
+        skipped.push({ filename: item.file.originalname, reason });
+      } else {
+        seen.add(item.hash);
+        validFiles.push(item);
+      }
+    }
+
+    if (validFiles.length === 0) return { uploaded: [], skipped };
+
+    if (activeCount + validFiles.length > MAX_ACTIVE_DOCUMENTS_PER_ADMIN) {
+      await deleteFiles(validFiles.map((v) => v.file.path));
+      return {
+        error: "limitExceeded",
+        message: `Upload exceeds maximum active document limit of ${MAX_ACTIVE_DOCUMENTS_PER_ADMIN} per admin. Current active documents: ${activeCount}, attempting to add: ${validFiles.length}.`,
+        activeCount,
+        attemptedCount: validFiles.length,
+      };
+    }
+
+    try {
+      const inputs: CreateDocumentInput[] = validFiles.map(({ file, hash }) => ({
         filename: file.originalname,
         fileType: path.extname(file.originalname).slice(1).toLowerCase(),
         filePath: path.relative(process.cwd(), file.path).replace(/\\/g, "/"),
         contentHash: hash,
-        uploadedBy: uploadedBy ?? null,
-      })
-    );
+        uploadedBy,
+      }));
 
-    const uploaded = await uploadDocuments(documentInputs, uploadedBy);
-
-    if (uploaded.length > 0) {
-      enqueueDocuments(uploaded.map((doc) => doc.id));
+      const uploaded = await uploadDocuments(inputs, uploadedBy);
+      if (uploaded.length > 0) enqueueDocuments(uploaded.map((d) => d.id));
+      return { uploaded, skipped };
+    } catch (error) {
+      await deleteFiles(validFiles.map((v) => v.file.path));
+      throw error;
     }
-
-    return {
-      uploaded,
-      skipped,
-    };
-  } catch (error) {
-    await Promise.all(validFilesToInsert.map((item) => deleteFile(item.file.path)));
-    throw error;
-  }
+  });
 };
 
-export const getDocuments = async (): Promise<Document[]> => {
-  return await db
-    .select()
-    .from(documents)
-    .orderBy(desc(documents.createdAt));
-};
+export const getDocuments = async (): Promise<Document[]> =>
+  db.select().from(documents).orderBy(desc(documents.createdAt));
 
 export const getDocumentById = async (id: string): Promise<Document | null> => {
-  const [found] = await db
-    .select()
-    .from(documents)
-    .where(eq(documents.id, id))
-    .limit(1);
-
+  const [found] = await db.select().from(documents).where(eq(documents.id, id)).limit(1);
   return found ?? null;
 };
 
-export const deleteDocument = async (id: string): Promise<Document | null> => {
+export const deleteDocument = async (
+  id: string,
+  user?: { id: string; role: string }
+): Promise<DeleteDocumentResult> => {
   const document = await getDocumentById(id);
-  if (!document) {
-    return null;
+  if (!document) return { error: "notFound" };
+
+  if (user && user.role !== ROLE_NAMES.SUPER_ADMIN && document.uploadedBy !== user.id) {
+    return { error: "forbidden" };
   }
 
-  // Delete from database (foreign key ON DELETE CASCADE removes associated document_chunks)
-  await db.delete(documents).where(eq(documents.id, id));
+  cancelIngestion(document.id);
 
-  // Safely remove associated uploaded file from filesystem using stored filePath
   if (document.filePath) {
-    const absolutePath = path.isAbsolute(document.filePath)
-      ? document.filePath
-      : path.resolve(process.cwd(), document.filePath);
-    await deleteFile(absolutePath);
+    const fullPath = path.resolve(process.cwd(), document.filePath);
+    try {
+      await fs.unlink(fullPath);
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        console.error(`Failed to delete local file ${fullPath}:`, err);
+        return { error: "cleanupFailed", details: `Failed to remove local file: ${(err as Error).message}` };
+      }
+    }
   }
 
-  return document;
+  const [deleted] = await db.delete(documents).where(eq(documents.id, id)).returning();
+  return deleted ? { success: true, document: deleted } : { error: "notFound" };
 };

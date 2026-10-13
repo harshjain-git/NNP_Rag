@@ -6,7 +6,7 @@ import fsSync from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import app from "../src/app.js";
 import { db, pool } from "../src/database/client.js";
 import { documents, documentChunks, ROLE_NAMES } from "../src/database/schema.js";
@@ -19,11 +19,16 @@ describe("Document APIs — Authentication, RBAC, and Lifecycle", () => {
   let baseUrl: string;
 
   const adminUserId = crypto.randomUUID();
+  const adminUser2Id = crypto.randomUUID();
   const userId = crypto.randomUUID();
   const superAdminUserId = crypto.randomUUID();
 
   const adminToken = jwt.sign(
     { sub: adminUserId, role: ROLE_NAMES.ADMIN },
+    JWT_SECRET
+  );
+  const adminToken2 = jwt.sign(
+    { sub: adminUser2Id, role: ROLE_NAMES.ADMIN },
     JWT_SECRET
   );
   const userToken = jwt.sign(
@@ -381,6 +386,323 @@ describe("Document APIs — Authentication, RBAC, and Lifecycle", () => {
         .from(documents)
         .where(eq(documents.id, docWithoutFile.id));
       assert.equal(deletedDoc, undefined);
+    });
+
+    it("should return 403 Forbidden when an ADMIN attempts to delete a document uploaded by another admin", async () => {
+      const testHash = crypto.randomBytes(16).toString("hex");
+      const [doc] = await db
+        .insert(documents)
+        .values({
+          filename: "owned-by-admin-1.txt",
+          fileType: "txt",
+          filePath: "uploads/owned-by-admin-1.txt",
+          contentHash: testHash,
+          status: "ready",
+          uploadedBy: adminUserId,
+        })
+        .returning();
+
+      const res = await fetch(`${baseUrl}/api/documents/${doc!.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${adminToken2}` },
+      });
+
+      assert.equal(res.status, 403);
+      const data = (await res.json()) as { error: string };
+      assert.ok(data.error.includes("Forbidden"));
+
+      await db.delete(documents).where(eq(documents.id, doc!.id));
+    });
+
+    it("should allow SUPER_ADMIN to delete a document uploaded by another admin", async () => {
+      const testHash = crypto.randomBytes(16).toString("hex");
+      const [doc] = await db
+        .insert(documents)
+        .values({
+          filename: "owned-by-admin-1-for-sa.txt",
+          fileType: "txt",
+          filePath: "uploads/owned-by-admin-1-for-sa.txt",
+          contentHash: testHash,
+          status: "ready",
+          uploadedBy: adminUserId,
+        })
+        .returning();
+
+      const res = await fetch(`${baseUrl}/api/documents/${doc!.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${superAdminToken}` },
+      });
+
+      assert.equal(res.status, 200);
+      const data = (await res.json()) as { message: string };
+      assert.equal(data.message, "Document deleted successfully");
+
+      const [check] = await db.select().from(documents).where(eq(documents.id, doc!.id));
+      assert.equal(check, undefined);
+    });
+
+    it("should abort deletion and return 500 when filesystem cleanup fails", async () => {
+      const uploadsDir = path.resolve(process.cwd(), "uploads");
+      const dirName = `dummy-dir-${Date.now()}`;
+      const dirPath = path.join(uploadsDir, dirName);
+      await fs.mkdir(dirPath, { recursive: true });
+      const relativeDirPath = path.relative(process.cwd(), dirPath).replace(/\\/g, "/");
+
+      const testHash = crypto.randomBytes(16).toString("hex");
+      const [docWithDir] = await db
+        .insert(documents)
+        .values({
+          filename: "cleanup-failure-doc.txt",
+          fileType: "txt",
+          filePath: relativeDirPath,
+          contentHash: testHash,
+          status: "ready",
+          uploadedBy: adminUserId,
+        })
+        .returning();
+
+      const res = await fetch(`${baseUrl}/api/documents/${docWithDir!.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+
+      assert.equal(res.status, 500);
+      const data = (await res.json()) as { error: string };
+      assert.ok(data.error.includes("Failed to delete document"));
+
+      // Verify the document was NOT deleted from database
+      const [persistedDoc] = await db
+        .select()
+        .from(documents)
+        .where(eq(documents.id, docWithDir!.id));
+      assert.ok(persistedDoc);
+
+      await fs.rmdir(dirPath);
+      await db.delete(documents).where(eq(documents.id, docWithDir!.id));
+    });
+  });
+
+  describe("Active Document Limits (Maximum 10 Active Documents Per Admin)", () => {
+    const limitAdminAId = crypto.randomUUID();
+    const limitAdminBId = crypto.randomUUID();
+    const limitAdminAToken = jwt.sign(
+      { sub: limitAdminAId, role: ROLE_NAMES.ADMIN },
+      JWT_SECRET
+    );
+    const limitAdminBToken = jwt.sign(
+      { sub: limitAdminBId, role: ROLE_NAMES.ADMIN },
+      JWT_SECRET
+    );
+
+    const createdDocIds: string[] = [];
+
+    after(async () => {
+      await waitForIngestionQueueIdle();
+      if (createdDocIds.length > 0) {
+        const docsToDelete = await db
+          .select({ id: documents.id, filePath: documents.filePath })
+          .from(documents)
+          .where(inArray(documents.id, createdDocIds));
+        for (const doc of docsToDelete) {
+          if (doc.filePath && !doc.filePath.includes("seed-doc")) {
+            try {
+              await fs.unlink(path.resolve(process.cwd(), doc.filePath));
+            } catch {}
+          }
+        }
+        await db.delete(documents).where(inArray(documents.id, createdDocIds));
+      }
+    });
+
+    it("should enforce independent 10-document limit per admin and reject the 11th upload", async () => {
+      // 1. Seed 10 active documents for Admin A
+      const seedDocs = [];
+      for (let i = 0; i < 10; i++) {
+        seedDocs.push({
+          filename: `seed-doc-${i}.txt`,
+          fileType: "txt",
+          filePath: `uploads/seed-doc-${i}.txt`,
+          contentHash: crypto.randomBytes(16).toString("hex"),
+          status: "ready",
+          uploadedBy: limitAdminAId,
+        });
+      }
+      const inserted = await db.insert(documents).values(seedDocs).returning({ id: documents.id });
+      createdDocIds.push(...inserted.map((d) => d.id));
+
+      // 2. Admin A attempts to upload an 11th document
+      const blob = new Blob(["Attempting 11th document upload"], { type: "text/plain" });
+      const formData = new FormData();
+      formData.append("file", blob, `eleventh-doc-${Date.now()}.txt`);
+
+      const res = await fetch(`${baseUrl}/api/documents/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${limitAdminAToken}` },
+        body: formData,
+      });
+
+      assert.equal(res.status, 400);
+      const data = (await res.json()) as { error: string };
+      assert.ok(data.error.includes("Maximum active document limit of 10 reached"));
+    });
+
+    it("should allow another admin to upload documents even when the first admin has reached their limit", async () => {
+      // Admin B currently has 0 active documents
+      const blob = new Blob(["Admin B independent upload content"], { type: "text/plain" });
+      const formData = new FormData();
+      formData.append("file", blob, `admin-b-doc-${Date.now()}.txt`);
+
+      const res = await fetch(`${baseUrl}/api/documents/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${limitAdminBToken}` },
+        body: formData,
+      });
+
+      assert.equal(res.status, 201);
+      const data = (await res.json()) as { uploaded: { id: string }[] };
+      assert.equal(data.uploaded.length, 1);
+      createdDocIds.push(data.uploaded[0]!.id);
+    });
+
+    it("should reject multi-file upload that would exceed the 10-document limit", async () => {
+      // Admin B currently has 1 active document.
+      // Uploading 10 files in one request would bring total to 1 + 10 = 11 > 10.
+      const formData = new FormData();
+      for (let i = 0; i < 10; i++) {
+        const blob = new Blob([`Batch file content ${i} - ${Date.now()}`], { type: "text/plain" });
+        formData.append("file", blob, `batch-file-${i}-${Date.now()}.txt`);
+      }
+
+      const res = await fetch(`${baseUrl}/api/documents/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${limitAdminBToken}` },
+        body: formData,
+      });
+
+      assert.equal(res.status, 400);
+      const data = (await res.json()) as { error: string };
+      assert.ok(data.error.includes("Upload exceeds maximum active document limit of 10"));
+    });
+
+    it("should prevent concurrent uploads from exceeding an individual admin's limit", async () => {
+      const concurrentAdminId = crypto.randomUUID();
+      const concurrentToken = jwt.sign(
+        { sub: concurrentAdminId, role: ROLE_NAMES.ADMIN },
+        JWT_SECRET
+      );
+
+      // Seed 9 active documents for concurrentAdmin
+      const seedDocs = [];
+      for (let i = 0; i < 9; i++) {
+        seedDocs.push({
+          filename: `concurrent-seed-${i}.txt`,
+          fileType: "txt",
+          filePath: `uploads/concurrent-seed-${i}.txt`,
+          contentHash: crypto.randomBytes(16).toString("hex"),
+          status: "ready",
+          uploadedBy: concurrentAdminId,
+        });
+      }
+      const inserted = await db.insert(documents).values(seedDocs).returning({ id: documents.id });
+      createdDocIds.push(...inserted.map((d) => d.id));
+
+      // Dispatch 2 concurrent upload requests (each attempting 1 file)
+      const form1 = new FormData();
+      form1.append("file", new Blob([`Concurrent file 1 - ${Date.now()}`], { type: "text/plain" }), `conc-1-${Date.now()}.txt`);
+
+      const form2 = new FormData();
+      form2.append("file", new Blob([`Concurrent file 2 - ${Date.now()}`], { type: "text/plain" }), `conc-2-${Date.now()}.txt`);
+
+      const [res1, res2] = await Promise.all([
+        fetch(`${baseUrl}/api/documents/upload`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${concurrentToken}` },
+          body: form1,
+        }),
+        fetch(`${baseUrl}/api/documents/upload`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${concurrentToken}` },
+          body: form2,
+        }),
+      ]);
+
+      const statuses = [res1.status, res2.status].sort();
+      // Exactly one request must succeed (201) and the second must be rejected (400)
+      assert.deepEqual(statuses, [201, 400]);
+
+      // Query database to ensure exactly 10 active documents exist for this admin
+      const activeDocs = await db
+        .select()
+        .from(documents)
+        .where(eq(documents.uploadedBy, concurrentAdminId));
+      assert.equal(activeDocs.length, 10);
+      createdDocIds.push(...activeDocs.map((d) => d.id));
+    });
+
+    it("should release active document slot when an ingestion job transitions to failed", async () => {
+      // Find one of Admin A's documents and mark it as 'failed'
+      const [docToFail] = await db
+        .select()
+        .from(documents)
+        .where(eq(documents.uploadedBy, limitAdminAId))
+        .limit(1);
+
+      assert.ok(docToFail);
+
+      await db
+        .update(documents)
+        .set({ status: "failed" })
+        .where(eq(documents.id, docToFail.id));
+
+      // Admin A should now have 9 active documents (1 slot released)
+      const blob = new Blob(["Upload after failed ingestion slot release"], { type: "text/plain" });
+      const formData = new FormData();
+      formData.append("file", blob, `slot-released-${Date.now()}.txt`);
+
+      const res = await fetch(`${baseUrl}/api/documents/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${limitAdminAToken}` },
+        body: formData,
+      });
+
+      assert.equal(res.status, 201);
+      const data = (await res.json()) as { uploaded: { id: string }[] };
+      assert.equal(data.uploaded.length, 1);
+      createdDocIds.push(data.uploaded[0]!.id);
+    });
+
+    it("should release active document slot when an active document is deleted", async () => {
+      // Admin A currently has 10 active documents again.
+      // Find one active document and delete it via API
+      const [docToDelete] = await db
+        .select()
+        .from(documents)
+        .where(and(eq(documents.uploadedBy, limitAdminAId), eq(documents.status, "ready")))
+        .limit(1);
+
+      assert.ok(docToDelete);
+
+      const deleteRes = await fetch(`${baseUrl}/api/documents/${docToDelete.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${limitAdminAToken}` },
+      });
+      assert.equal(deleteRes.status, 200);
+
+      // Now upload 1 document into the released slot
+      const blob = new Blob(["Upload after delete slot release"], { type: "text/plain" });
+      const formData = new FormData();
+      formData.append("file", blob, `delete-released-${Date.now()}.txt`);
+
+      const uploadRes = await fetch(`${baseUrl}/api/documents/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${limitAdminAToken}` },
+        body: formData,
+      });
+
+      assert.equal(uploadRes.status, 201);
+      const data = (await uploadRes.json()) as { uploaded: { id: string }[] };
+      assert.equal(data.uploaded.length, 1);
+      createdDocIds.push(data.uploaded[0]!.id);
     });
   });
 });

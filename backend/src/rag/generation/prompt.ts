@@ -31,12 +31,19 @@ export const formatEvidenceContext = (chunks: RetrievedChunk[]): string => {
 export const buildRAGPrompt = (
   query: string,
   chunks: RetrievedChunk[],
-  customSystemPrompt?: string
+  customSystemPrompt?: string,
+  conversationHistory?: Array<{ role: string; content: string }>
 ): { systemPrompt: string; userPrompt: string } => {
   const systemPrompt = customSystemPrompt || DEFAULT_RAG_SYSTEM_PROMPT;
   const context = formatEvidenceContext(chunks);
+  const historyText =
+    conversationHistory && conversationHistory.length > 0
+      ? `PRIOR CONVERSATION CONTEXT:\n${conversationHistory
+          .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+          .join("\n")}\n\n`
+      : "";
 
-  const userPrompt = `EVIDENCE SOURCES:
+  const userPrompt = `${historyText}EVIDENCE SOURCES:
 ${context}
 
 USER QUESTION:

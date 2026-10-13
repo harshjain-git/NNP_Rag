@@ -10,6 +10,11 @@ import {
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const parseUuidParam = (param: unknown): string | null => {
+  const id = (Array.isArray(param) ? param[0] : param)?.trim();
+  return id && UUID_REGEX.test(id) ? id : null;
+};
+
 export const uploadDocumentController = async (
   req: Request,
   res: Response
@@ -23,11 +28,25 @@ export const uploadDocumentController = async (
     return;
   }
 
+  const userId = req.user?.id;
+  if (!userId) {
+    res.status(401).json({ error: "Missing authorization" });
+    return;
+  }
+
   try {
-    const { uploaded, skipped } = await processUploadedFiles(
-      files,
-      req.user?.id
-    );
+    const result = await processUploadedFiles(files, userId);
+
+    if ("error" in result) {
+      if (result.error === "limitExceeded") {
+        res.status(400).json({ error: result.message });
+        return;
+      }
+      res.status(400).json({ error: "Failed to upload document" });
+      return;
+    }
+
+    const { uploaded, skipped } = result;
 
     if (uploaded.length === 0) {
       res.status(409).json({
@@ -75,10 +94,8 @@ export const getDocumentByIdController = async (
   req: Request,
   res: Response
 ): Promise<void> => {
-  const rawId = req.params.id;
-  const id = Array.isArray(rawId) ? rawId[0] : rawId;
-
-  if (!id || typeof id !== "string" || !UUID_REGEX.test(id.trim())) {
+  const id = parseUuidParam(req.params.id);
+  if (!id) {
     res.status(400).json({
       error: "Invalid document ID format. Expected a valid UUID",
     });
@@ -86,7 +103,7 @@ export const getDocumentByIdController = async (
   }
 
   try {
-    const doc = await getDocumentById(id.trim());
+    const doc = await getDocumentById(id);
     if (!doc) {
       res.status(404).json({ error: "Document not found" });
       return;
@@ -104,10 +121,8 @@ export const deleteDocumentController = async (
   req: Request,
   res: Response
 ): Promise<void> => {
-  const rawId = req.params.id;
-  const id = Array.isArray(rawId) ? rawId[0] : rawId;
-
-  if (!id || typeof id !== "string" || !UUID_REGEX.test(id.trim())) {
+  const id = parseUuidParam(req.params.id);
+  if (!id) {
     res.status(400).json({
       error: "Invalid document ID format. Expected a valid UUID",
     });
@@ -115,20 +130,33 @@ export const deleteDocumentController = async (
   }
 
   try {
-    const deleted = await deleteDocument(id.trim());
-    if (!deleted) {
-      res.status(404).json({ error: "Document not found" });
+    const result = await deleteDocument(id, req.user);
+    if ("error" in result) {
+      if (result.error === "notFound") {
+        res.status(404).json({ error: "Document not found" });
+      } else if (result.error === "forbidden") {
+        res.status(403).json({
+          error: "Forbidden: You are not authorized to delete this document",
+        });
+      } else if (result.error === "cleanupFailed") {
+        res.status(500).json({
+          error: `Failed to delete document: ${result.details}`,
+        });
+      } else {
+        res.status(400).json({ error: "Failed to delete document" });
+      }
       return;
     }
 
     res.status(200).json({
       message: "Document deleted successfully",
-      documentId: deleted.id,
-      filename: deleted.filename,
+      documentId: result.document.id,
+      filename: result.document.filename,
     });
   } catch (error) {
     console.error("Error in deleteDocumentController:", error);
     res.status(500).json({ error: "Failed to delete document" });
   }
 };
+
 

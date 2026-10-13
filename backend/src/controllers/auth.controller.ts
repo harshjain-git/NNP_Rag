@@ -4,27 +4,25 @@ import { registerUser, loginUser } from "../services/auth.service.js";
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const registerController = async (req: Request, res: Response): Promise<void> => {
-  const { name, email, password } = (req.body ?? {}) as {
-    name?: string;
-    email?: string;
-    password?: string;
-  };
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  const email = typeof req.body?.email === "string" ? req.body.email.trim() : "";
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
 
-  if (!name || typeof name !== "string" || !name.trim()) {
+  if (!name) {
     res.status(400).json({ error: "Name is required" });
     return;
   }
-  if (!email || typeof email !== "string" || !EMAIL_REGEX.test(email.trim())) {
+  if (!email || !EMAIL_REGEX.test(email)) {
     res.status(400).json({ error: "Valid email is required" });
     return;
   }
-  if (!password || typeof password !== "string" || password.length < 8) {
+  if (password.length < 8) {
     res.status(400).json({ error: "Password must be at least 8 characters long" });
     return;
   }
 
   try {
-    const result = await registerUser(name.trim(), email.trim().toLowerCase(), password);
+    const result = await registerUser(name, email.toLowerCase(), password);
     if ("error" in result) {
       res.status(409).json({ error: "Email is already registered" });
       return;
@@ -38,18 +36,16 @@ export const registerController = async (req: Request, res: Response): Promise<v
 };
 
 export const loginController = async (req: Request, res: Response): Promise<void> => {
-  const { email, password } = (req.body ?? {}) as {
-    email?: string;
-    password?: string;
-  };
+  const email = typeof req.body?.email === "string" ? req.body.email.trim() : "";
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
 
-  if (!email || typeof email !== "string" || !email.trim() || !password || typeof password !== "string") {
+  if (!email || !password) {
     res.status(400).json({ error: "Email and password are required" });
     return;
   }
 
   try {
-    const result = await loginUser(email.trim().toLowerCase(), password);
+    const result = await loginUser(email.toLowerCase(), password);
     if (!result) {
       res.status(401).json({ error: "Invalid email or password" });
       return;
@@ -61,3 +57,4 @@ export const loginController = async (req: Request, res: Response): Promise<void
     res.status(500).json({ error: "Login failed" });
   }
 };
+

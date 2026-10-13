@@ -50,8 +50,8 @@ Phase 1 delivers the foundational RAG pipeline alongside planned authentication,
 * **Semantic Retrieval [Implemented]:** Cosine similarity retrieval (`<=>`) on ready document chunks using `PGVectorRetriever`.
 * **LLM Generation & Citations [Implemented]:** Multi-provider abstraction (Groq, Gemini, Ollama), dual-layer evidence sufficiency checking, grounded synthesis, and source citation extraction.
 * **Real-Time Visibility [Implemented]:** WebSocket streaming (`/ws`) of asynchronous document ingestion lifecycle events.
-* **User Authentication & RBAC [Planned - Milestone 2]:** User registration, login, stateless JWT issuance, and server-side role enforcement.
-* **Chat & History [Planned - Milestone 2]:** Multi-turn conversation threads, message persistence, and citation linkage.
+* **User Authentication & RBAC [Implemented]:** User registration, login, stateless JWT issuance, and server-side role enforcement.
+* **Chat & History [Implemented]:** Multi-turn conversation threads, message persistence, citation linkage, 50-message limit with rollover, and conversation REST APIs.
 * **Prompt Management [Planned - Milestone 2]:** Database-backed prompt storage and administrative controls.
 * **Frontend Web Application [Planned - Milestone 3]:** Next.js App Router UI for document upload, real-time ingestion tracking, and conversational Q&A.
 
@@ -61,11 +61,11 @@ The following are intentionally excluded to maintain architectural simplicity: m
 ## 2.3 User Roles & Permissions Matrix
 The backend serves as the sole security boundary; permissions are enforced via server-side RBAC middleware:
 
-| Role | Scope & Permissions | Protected Operations |
+| **Role** | **Scope & Permissions** | **Protected Operations** |
 | :--- | :--- | :--- |
 | **USER** | Standard consumer of document knowledge. Can authenticate, list accessible documents, execute queries, view grounded answers with citations, and manage personal conversation history. | Cannot upload/modify documents, cannot alter prompts, cannot access administrative endpoints. |
-| **ADMIN** | Knowledge and prompt administrator. Inherits all User permissions. Can upload documents, trigger processing, delete documents, manage prompts, and view ingestion telemetry. | Document upload/deletion (`/api/documents`), prompt CRUD (`/api/prompts`), ingestion monitoring. |
-| **SUPER_ADMIN** | System administrator. Inherits all Admin permissions. Can manage user accounts, assign roles, configure global prompts, and adjust provider configurations. | User role modification, system-level configurations, administrative user provisioning. |
+| **ADMIN** | Knowledge and prompt administrator. Inherits all User permissions. Can upload documents (up to 10 active documents per admin), trigger processing, delete owned documents, manage prompts, and view ingestion telemetry. | Document upload/deletion (`/api/documents`), prompt CRUD (`/api/prompts`), ingestion monitoring. |
+| **SUPER_ADMIN** | System administrator. Inherits all Admin permissions. Can manage all documents across the system, manage user accounts, assign roles, configure global prompts, and adjust provider configurations. | Document deletion across any admin, user role modification, system-level configurations, administrative user provisioning. |
 
 ---
 
@@ -117,14 +117,15 @@ NNT_Rag/
 ### 3.1 Backend Module Ownership Breakdown
 * **`config/` [Implemented]:** Centralizes environment configuration parsing (`env.ts`) and RAG hyperparameters (`rag.ts`). No process variables are read outside this module.
 * **`database/` [Implemented]:** Owns the Drizzle ORM client, connection pooling to Supabase PostgreSQL, and declarative table schema definitions (`schema.ts`).
-* **`routes/`:** Thin HTTP routing layer (`documents.routes.ts`, `chat.routes.ts` [implemented]; `auth.routes.ts`, `prompts.routes.ts` [planned]).
-* **`controllers/`:** Extracts request parameters, handles HTTP status codes, and delegates execution to services (`documents.controller.ts`, `chat.controller.ts` [implemented]).
-* **`services/`:** Implements core business logic, transactional database persistence, and orchestration (`document.service.ts` [implemented]).
+* **`routes/` [Implemented]:** Thin HTTP routing layer (`documents.routes.ts`, `chat.routes.ts`, `conversation.routes.ts`, `auth.routes.ts`, `admin.routes.ts` [implemented]; `prompts.routes.ts` [planned]).
+* **`controllers/` [Implemented]:** Extracts request parameters, handles HTTP status codes, and delegates execution to services (`documents.controller.ts`, `chat.controller.ts`, `conversation.controller.ts`, `auth.controller.ts`, `admin.controller.ts` [implemented]).
+* **`services/` [Implemented]:** Implements core business logic, transactional database persistence, and orchestration (`document.service.ts`, `conversation.service.ts`, `auth.service.ts`, `admin.service.ts` [implemented]).
 * **`middleware/`:** Houses upload handling (`upload.middleware.ts` [implemented]), authentication guard (`auth.middleware.ts` [implemented]), role checking (`role.middleware.ts` [implemented]), and planned centralized error handling (`error.middleware.ts`).
 * **`validators/` [Planned]:** Zod schemas validating HTTP request bodies, query strings, and path parameters before execution.
 * **`providers/` [Implemented]:** Vendor-agnostic abstractions isolating LLM generation and embedding models behind clean contracts.
 * **`rag/` [Implemented]:** Houses the ingestion, retrieval, and generation engines implementing core RAG capabilities.
 * **`realtime/` [Implemented]:** Manages the WebSocket server and broadcasts typed ingestion telemetry events.
+* **`utils/` [Implemented]:** Houses shared helper utilities including file hashing and file deletion management (`file.ts`).
 
 ---
 
@@ -152,11 +153,13 @@ $$\text{HTTP Request} \longrightarrow \text{Route} \longrightarrow \text{Middlew
 | **Auth** | `/api/auth/register` | `POST` | Public | `{ email, password, name }` | `{ user: { id, email, role }, token }` | **Implemented** (Active route) |
 | | `/api/auth/login` | `POST` | Public | `{ email, password }` | `{ user: { id, email, role }, token }` | **Implemented** (Active route) |
 | **Chat** | `/api/chat` | `POST` | `USER` / `ADMIN` / `SUPER_ADMIN` | `{ query, documentId? }` | `{ answer, evidenceSufficient, citations, modelName, providerName }` | **Implemented** (JWT + RBAC protected) |
-| | `/api/conversations` | `GET` | `USER` | `?limit=20&offset=0` | `Conversation[]` | Planned (Milestone 2) |
-| | `/api/conversations/:id` | `GET` | `USER` | None | `Conversation & { messages: Message[] }` | Planned (Milestone 2) |
+| | `/api/conversations` | `GET` | `USER` / `ADMIN` / `SUPER_ADMIN` | None | `{ conversations: Conversation[] }` | **Implemented** (JWT + RBAC protected) |
+| | `/api/conversations/:id` | `GET` | `USER` / `ADMIN` / `SUPER_ADMIN` | None | `{ conversation: Conversation & { messages: Message[] }, messages: Message[] }` | **Implemented** (JWT + RBAC protected) |
+| | `/api/conversations/:id` | `DELETE` | `USER` / `ADMIN` / `SUPER_ADMIN` | None | `{ message: string, id: string }` | **Implemented** (JWT + RBAC protected) |
 | **Admin** | `/api/admin/users` | `GET` | `SUPER_ADMIN` | None | `{ users: SafeUser[] }` | **Implemented** (JWT + RBAC protected) |
 | | `/api/admin/users/:id/role` | `PATCH` | `SUPER_ADMIN` | `{ role: RoleName }` | `{ message: string, user: SafeUser }` | **Implemented** (JWT + RBAC protected) |
 | | `/api/admin/users` | `POST` | `SUPER_ADMIN` | `{ name, email, password, role }` | `{ message: string, user: SafeUser }` | **Implemented** (JWT + RBAC protected) |
+| | `/api/admin/users/:id` | `DELETE` | `SUPER_ADMIN` | None | `{ message: string, user: SafeUser }` | **Implemented** (JWT + RBAC protected) |
 | **Prompts** | `/api/prompts` | `GET` | `ADMIN` | None | `Prompt[]` | Planned (Milestone 2) |
 | | `/api/prompts` | `POST` | `ADMIN` | `{ name, content, type }` | `Prompt` | Planned (Milestone 2) |
 | | `/api/prompts/:id` | `PUT` | `ADMIN` | `{ content?, status? }` | `Prompt` | Planned (Milestone 2) |
@@ -195,12 +198,11 @@ Ready ←── pgvector Commit ←── Embed (Jina v2) ←── Structural C
 ```
 
 ## 5.1 Pipeline Stages (`src/rag/ingestion/`)
-1. **Validation & Deduplication (`document.service.ts`):** Validates format (`.pdf`, `.docx`, `.txt`). Computes SHA-256 hash across raw file bytes; duplicate hashes are skipped to prevent redundant compute:
+1. **Per-Admin Document Limit & Deduplication (`document.service.ts`):** Enforces a maximum of `MAX_ACTIVE_DOCUMENTS_PER_ADMIN = 10` (configured in `src/config/rag.ts`) per admin using an in-process per-admin concurrency lock. Active documents include `uploaded`, `processing`, and `ready` states (failed documents and deleted documents release their slot). Computes SHA-256 hash across raw file bytes; duplicate hashes are skipped to prevent redundant compute.
    ```typescript
-   export interface ProcessUploadResult {
-     uploaded: Document[];
-     skipped: { filename: string; reason: string }[];
-   }
+   export type ProcessUploadResult =
+     | { uploaded: Document[]; skipped: SkippedDocument[] }
+     | { error: "limitExceeded"; message: string; activeCount: number; attemptedCount: number };
    ```
 2. **Local Storage:** Files are persisted to `backend/uploads/{timestamp}-{filename}`.
 3. **Ingestion Queue (`queue.ts`):** In-memory asynchronous concurrency queue processing up to `INGESTION_CONCURRENCY = 3` documents simultaneously.
@@ -276,33 +278,6 @@ export const documentChunks = pgTable("document_chunks", {
   index("idx_document_chunks_document_id").on(table.documentId),
 ]);
 
-export type Role = typeof roles.$inferSelect;
-export type NewRole = typeof roles.$inferInsert;
-export type User = typeof users.$inferSelect;
-export type NewUser = typeof users.$inferInsert;
-export type Document = typeof documents.$inferSelect;
-export type NewDocument = typeof documents.$inferInsert;
-export type DocumentChunk = typeof documentChunks.$inferSelect;
-export type NewDocumentChunk = typeof documentChunks.$inferInsert;
-```
-
-## 6.2 Planned Schema Entities (Phase 1 Milestone 2: Prompts & Conversations)
-*(Architectural design for upcoming chat history & prompt management; not yet declared in `src/database/schema.ts`)*
-
-```typescript
-
-// prompts: Admin-configured RAG and system prompts
-export const prompts = pgTable("prompts", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: text("name").notNull().unique(),
-  content: text("content").notNull(),
-  type: text("type").notNull(), // system | rag | citation
-  status: text("status").notNull().default("active"), // active | draft
-  createdBy: uuid("created_by").references(() => users.id),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
 // conversations: Multi-turn chat sessions
 export const conversations = pgTable("conversations", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -310,7 +285,9 @@ export const conversations = pgTable("conversations", {
   title: text("title").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("idx_conversations_user_id").on(table.userId),
+]);
 
 // messages: Chat history entries linked to conversations
 export const messages = pgTable("messages", {
@@ -320,7 +297,44 @@ export const messages = pgTable("messages", {
   content: text("content").notNull(),
   citations: jsonb("citations").default([]),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("idx_messages_conversation_id").on(table.conversationId),
+]);
+
+export type Role = typeof roles.$inferSelect;
+export type NewRole = typeof roles.$inferInsert;
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+export type Document = typeof documents.$inferSelect;
+export type NewDocument = typeof documents.$inferInsert;
+export type DocumentChunk = typeof documentChunks.$inferSelect;
+export type NewDocumentChunk = typeof documentChunks.$inferInsert;
+export type Conversation = typeof conversations.$inferSelect;
+export type NewConversation = typeof conversations.$inferInsert;
+export type Message = typeof messages.$inferSelect;
+export type NewMessage = typeof messages.$inferInsert;
+```
+
+## 6.2 Prompts Schema Entity (`src/database/schema.ts`)
+[Implemented in Phase 2 & Phase 3]
+
+```typescript
+// prompts: Admin-configured RAG and system prompts
+export const prompts = pgTable("prompts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull().unique(),
+  content: text("content").notNull(),
+  type: text("type").notNull(), // system | rag | citation
+  status: text("status").notNull().default("active"), // active | draft
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_prompts_type_status").on(table.type, table.status),
+]);
+
+export type Prompt = typeof prompts.$inferSelect;
+export type NewPrompt = typeof prompts.$inferInsert;
 ```
 
 ---
@@ -431,6 +445,13 @@ INSUFFICIENT_EVIDENCE: <brief explanation of what information is missing>
 
 Context formatting concatenates evidence with numbered tags:
 `[Source {i}] (Document: "{filename}", Page: {page}, Chunk: {index}):\n{content}`
+
+## 8.3 Dynamic Prompt Selection and Generator Integration (`src/rag/generation/generator.ts`)
+The generator integrates database-managed system prompts with the following resolution precedence per generation request:
+1. **Explicit Override:** If `options.systemPrompt` is passed, it is used immediately without querying the database.
+2. **Database Active System Prompt:** Otherwise, `promptsService.getActivePrompt("system")` is queried once. If an active prompt exists and has non-empty content, its content is applied.
+3. **Graceful Fallback:** If no active system prompt exists in the database, the generator falls back to `DEFAULT_RAG_SYSTEM_PROMPT`.
+4. **Resilient Error Handling:** If the database query encounters an unexpected network/database failure, the error is logged as a warning (`console.warn`) and the generator automatically falls back to `DEFAULT_RAG_SYSTEM_PROMPT` without disrupting answer generation.
 
 ---
 
@@ -597,10 +618,11 @@ The security architecture specifies requirements for the planned authentication 
 | **Evidence Sufficiency** | **Implemented** | Dual-layer check: pre-generation score gate (`0.65`) + in-context refusal sentinel. |
 | **Grounded Answer & Citations**| **Implemented** | Strict grounding prompt, source tag extraction, metadata citation resolution. |
 | **Realtime WebSockets** | **Implemented** | Mounted on `/ws`, broadcasts 6 ingestion lifecycle events. |
-| **Chat HTTP Endpoint** | **Implemented** | Express endpoint `POST /api/chat` with input validation, error handling, evidence sufficiency gating, and citations. |
-| **Conversation Persistence**| **Planned** | Database tables (`conversations`, `messages`), multi-turn session persistence service. |
+| **Chat HTTP Endpoint** | **Implemented** | Express endpoint `POST /api/chat` with input validation (including optional `systemPrompt` override forwarding), error handling, evidence sufficiency gating, and citations. |
+| **Conversation Persistence**| **Implemented** | Database tables (`conversations`, `messages`), multi-turn session persistence service. |
 | **User Authentication & RBAC** | **Implemented** | Registration & login active with bcrypt (10 rounds), JWT issuance, and route protection middleware (`auth.middleware.ts`, `role.middleware.ts`). |
-| **Prompt Management API** | **Planned** | Database table (`prompts`), admin CRUD endpoints for system/RAG prompt overrides. |
+| **Prompt Management API** | **Implemented** | Database table (`prompts`), admin CRUD endpoints (`/api/prompts`) for system/RAG prompt overrides. |
+| **RAG Prompt Generator Integration** | **Implemented** | Dynamic active system prompt lookup in `generateAnswer` with graceful fallback to `DEFAULT_RAG_SYSTEM_PROMPT` and explicit override precedence. |
 | **Next.js Frontend UI** | **Planned** | Initial Next.js starter setup; document upload UI and chat interface pending. |
 
 ## 13.2 Acceptance Criteria by Milestone
@@ -618,10 +640,13 @@ The security architecture specifies requirements for the planned authentication 
 - [x] **Authentication:** User registration/login with bcrypt hashing (10 salt rounds), server-side `USER` role assignment, stateless JWT issuance, and generic credential failure responses.
 - [x] **Super Admin Bootstrapping:** Idempotent database seeding (`npm run db:seed`) creates canonical roles and initial `SUPER_ADMIN` account with bcrypt-hashed credentials configured via environment variables.
 - [x] **RBAC Route Protection:** Server-side role middleware on protected endpoints (`auth.middleware.ts`, `role.middleware.ts`).
-- [ ] **Conversational History:** Multi-turn conversation sessions and message persistence in PostgreSQL (`conversations`, `messages`).
-- [ ] **Chat HTTP Route:** Express endpoint `/api/chat` orchestrating `generateAnswer` with conversation persistence.
-- [ ] **Prompt Administration:** Database-backed prompt storage and administrative CRUD endpoints (`/api/prompts`).
+- [x] **User Administration:** User management endpoints (`GET /api/admin/users`, `PATCH /api/admin/users/:id/role`, `POST /api/admin/users`, `DELETE /api/admin/users/:id`) with role-based protections against self-demotion, self-deletion, and last super admin deletion.
+- [x] **Conversational History:** Multi-turn conversation sessions and message persistence in PostgreSQL (`conversations`, `messages`).
+- [x] **Chat HTTP Route:** Express endpoint `/api/chat` orchestrating `generateAnswer` with conversation persistence and explicit system prompt override support.
+- [x] **Prompt Administration API:** Database-backed prompt storage and administrative CRUD endpoints (`/api/prompts`).
+- [x] **RAG Generator Prompt Integration:** Dynamic resolution of active system prompt from database with fallback to default on absence or failure, preserving strict grounding and citation behavior.
 - [x] **Document Lifecycle Management:** Document deletion endpoint (`DELETE /api/documents/:id`) with cascading chunk removal.
+
 
 ### Milestone 3: Next.js Frontend Web Application (Planned)
 - [ ] **Document Upload Interface:** Drag-and-drop file upload with real-time WebSocket progress bars.
@@ -639,6 +664,7 @@ The security architecture specifies requirements for the planned authentication 
 * **2026-10-08 — pgvector Semantic Retrieval:** Built `PGVectorRetriever` subclassing LlamaIndex.TS `BaseRetriever` using pgvector cosine distance operator `<=>`.
 * **2026-10-08 — Dual-Layer Evidence Sufficiency & Citations:** Implemented pre-generation similarity gating (threshold `0.65`) combined with LLM sentinel refusal parsing (`INSUFFICIENT_EVIDENCE:`) to systematically mitigate hallucinations, refuse out-of-domain queries, and attach verifiable source citations.
 * **2026-10-08 — Ollama Provider Integration & Provider Symmetry:** Integrated local Ollama provider with installed model `hf.co/unsloth/Qwen3.5-0.8B-GGUF:Q4_K_M` alongside Groq and Gemini, featuring configurable environment selection and reasoning-stream support.
+* **2026-10-13 — Dynamic RAG System Prompt Integration:** Integrated active system prompt selection into `generator.ts` with explicit option override precedence, single-query lookup via `promptsService.getActivePrompt("system")`, graceful fallback to `DEFAULT_RAG_SYSTEM_PROMPT` on query error or absence, and zero disturbance to retrieval, evidence gating, and citation mapping.
 
 ## 14.2 Future Scope (Phase 2+)
 Cloud object storage (S3/Supabase Storage), hybrid BM25 + vector search, cross-encoder reranking, query rewriting, conversation-aware retrieval, prompt versioning, streaming LLM responses over WebSockets/SSE, and automated RAG evaluation benchmarking.

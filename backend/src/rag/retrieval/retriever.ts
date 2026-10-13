@@ -122,3 +122,8 @@ export const retrieveChunks = async (
 
   return uniqueChunks;
 };
+
+export const chunkRetriever = {
+  retrieveChunks,
+};
+

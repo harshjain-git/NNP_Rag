@@ -1,10 +1,15 @@
 import type { Request, Response } from "express";
-import { listUsers, updateUserRole, createAdminUser } from "../services/admin.service.js";
+import { listUsers, updateUserRole, createAdminUser, deleteUser } from "../services/admin.service.js";
 import { ROLE_NAMES, type RoleName } from "../database/schema.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const VALID_ROLES = new Set(Object.values(ROLE_NAMES));
+
+const parseUuidParam = (param: unknown): string | null => {
+  const id = typeof param === "string" ? param.trim() : "";
+  return UUID_REGEX.test(id) ? id : null;
+};
 
 export const listUsersController = async (_req: Request, res: Response): Promise<void> => {
   try {
@@ -17,8 +22,8 @@ export const listUsersController = async (_req: Request, res: Response): Promise
 };
 
 export const updateUserRoleController = async (req: Request, res: Response): Promise<void> => {
-  const id = typeof req.params.id === "string" ? req.params.id.trim() : "";
-  if (!UUID_REGEX.test(id)) {
+  const id = parseUuidParam(req.params.id);
+  if (!id) {
     res.status(400).json({ error: "Invalid user ID format. Expected a valid UUID" });
     return;
   }
@@ -32,19 +37,13 @@ export const updateUserRoleController = async (req: Request, res: Response): Pro
   try {
     const result = await updateUserRole(req.user!.id, id, role as RoleName);
     if ("error" in result) {
-      if (result.error === "notFound") {
-        res.status(404).json({ error: "User not found" });
-        return;
-      }
-      if (result.error === "selfDemotion") {
-        res.status(400).json({ error: "Cannot demote yourself from SUPER_ADMIN role" });
-        return;
-      }
-      if (result.error === "lastSuperAdmin") {
-        res.status(400).json({ error: "Cannot demote the last remaining Super Admin in the system" });
-        return;
-      }
-      res.status(400).json({ error: "Invalid role update request" });
+      const errorMap: Record<string, { status: number; message: string }> = {
+        notFound: { status: 404, message: "User not found" },
+        selfDemotion: { status: 400, message: "Cannot demote yourself from SUPER_ADMIN role" },
+        lastSuperAdmin: { status: 400, message: "Cannot demote the last remaining Super Admin in the system" },
+      };
+      const err = errorMap[result.error] ?? { status: 400, message: "Invalid role update request" };
+      res.status(err.status).json({ error: err.message });
       return;
     }
 
@@ -99,3 +98,31 @@ export const createUserByAdminController = async (req: Request, res: Response): 
     res.status(500).json({ error: "Failed to create user" });
   }
 };
+
+export const deleteUserController = async (req: Request, res: Response): Promise<void> => {
+  const id = parseUuidParam(req.params.id);
+  if (!id) {
+    res.status(400).json({ error: "Invalid user ID format. Expected a valid UUID" });
+    return;
+  }
+
+  try {
+    const result = await deleteUser(req.user!.id, id);
+    if ("error" in result) {
+      const errorMap: Record<string, { status: number; message: string }> = {
+        notFound: { status: 404, message: "User not found" },
+        selfDeletion: { status: 400, message: "Cannot delete your own account" },
+        lastSuperAdmin: { status: 400, message: "Cannot delete the last remaining Super Admin in the system" },
+      };
+      const err = errorMap[result.error] ?? { status: 400, message: "Invalid user deletion request" };
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+
+    res.status(200).json({ message: "User deleted successfully", user: result.user });
+  } catch (error) {
+    console.error("Delete user error:", error);
+    res.status(500).json({ error: "Failed to delete user" });
+  }
+};
+
