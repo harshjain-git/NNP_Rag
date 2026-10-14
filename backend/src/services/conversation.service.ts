@@ -229,3 +229,61 @@ export const saveExchange = async (
     };
   });
 };
+
+export interface PersistChatExchangeResult {
+  finalConversationId: string;
+  isNewConversation: boolean;
+  remainingMessages: number;
+  warning: string | null;
+}
+
+export const persistChatExchange = async (
+  conversationId: string,
+  userId: string,
+  query: string,
+  answer: string,
+  citations: unknown[],
+  isInitialNewConv = false
+): Promise<PersistChatExchangeResult> => {
+  let finalConversationId = conversationId;
+  let finalIsNewConversation = isInitialNewConv;
+  let remainingMessages = MAX_MESSAGES_PER_CONVERSATION;
+  let warning: string | null = null;
+
+  let saveRes = await saveExchange(
+    finalConversationId,
+    userId,
+    query,
+    answer,
+    citations
+  );
+
+  if ("error" in saveRes && saveRes.error === "limitExceeded") {
+    const newConv = await createConversation(
+      userId,
+      query.slice(0, CONVERSATION_TITLE_MAX_LENGTH)
+    );
+    finalConversationId = newConv.id;
+    finalIsNewConversation = true;
+    saveRes = await saveExchange(
+      finalConversationId,
+      userId,
+      query,
+      answer,
+      citations
+    );
+  }
+
+  if ("success" in saveRes) {
+    remainingMessages = saveRes.remainingMessages;
+    warning = saveRes.warning;
+  }
+
+  return {
+    finalConversationId,
+    isNewConversation: finalIsNewConversation,
+    remainingMessages,
+    warning,
+  };
+};
+

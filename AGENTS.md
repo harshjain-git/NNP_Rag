@@ -86,53 +86,51 @@ Before writing any code:
 
 ## 8. Communication: After Every Implementation
 
-After completing any change, provide a structured explanation covering:
-* **What changed:** Clear summary of what was accomplished.
-* **Files modified:** Exact list of files created or updated with clickable links.
-* **Rationale:** Why the change was made.
-* **How it works:** Core mechanism of the implementation.
-* **Architectural alignment:** How it fits into the broader system architecture.
-* **Manual verification:** Step-by-step instructions for testing and validating the change.
+After completing a change, provide a concise explanation covering:
 
-### Required Two-Level Explanations:
-Always structure the explanation into two distinct levels:
-1. **Simple Explanation (Python Bridge):**
-   * Tailored for someone who understands programming and Python well but is learning JavaScript/TypeScript.
-   * Uses intuitive Python analogues (e.g., comparing `Promise`/`async/await` to Python `asyncio`, TypeScript `interface` to Python `TypedDict`/Pydantic, `multer` to FastAPI file uploads).
-2. **Technical Explanation (Deep Dive):**
-   * Covers the exact JavaScript/TypeScript, Node.js, Express, database, pgvector, or RAG concepts involved.
+- **What changed:** Brief summary of the work.
+- **Files modified:** Exact file paths.
+- **Rationale:** Why the change was needed.
+- **Verification:** Commands run and manual testing steps.
+- **Remaining issues:** Any known limitations or failures.
 
----
+Keep reports short, clear, and focused on the assigned task. Explain technical details only when necessary or requested.
 
-## 9. User Learning Background & Python Comparisons
+## 9. User Learning Background
 
-The repository owner is primarily a **Python developer** mastering JavaScript/TypeScript while developing this system.
+The repository owner is primarily a Python developer learning JavaScript and TypeScript.
 
-* When introducing JS/TS-specific patterns, briefly connect them to their Python counterparts when helpful:
-  * `Promise` / `async/await` ↔ Python `asyncio` / coroutines
-  * TypeScript `interface` / `type` ↔ Python `typing.TypedDict` / Pydantic models / dataclasses
-  * Generics (`<T>`) ↔ Python `TypeVar` / generic typing
-  * Express middleware (`(req, res, next) => {}`) ↔ FastAPI / Flask middleware or decorators
-  * Node.js Streams / Buffers ↔ Python `io.BytesIO` / file streams
-  * NPM / ESM modules (`type: "module"`) ↔ Python modules / `__init__.py` packaging
-  * Callbacks & Event Loop ↔ Python event loops and asynchronous callbacks
-  * Dependency injection / Provider patterns ↔ Python class-based adapters / factory patterns
-* **Do not** explain basic programming fundamentals (loops, conditionals, basic OOP) that an experienced programmer already knows.
+When a JS/TS-specific concept is important or unfamiliar, briefly relate it to a Python equivalent when helpful. Avoid unnecessary explanations of basic programming concepts, repeated analogies, and lengthy technical walkthroughs.
 
----
+## 10. Frontend Architecture and Code Quality
 
-## 10. Scope Discipline & Development Cycle
+- **Frontend architecture:** Always read and follow `frontend/FRONTEND_ARCHITECTURE.md` when working on frontend code, alongside `project_blueprint.md` and the applicable `AGENTS.md`.
+- **Simple, readable code:** Write the smallest clean implementation that follows the documented architecture.
+- **Minimum necessary lines:** Avoid unnecessary boilerplate, excessive comments, redundant variables, and needless abstractions. Keep code concise without sacrificing readability, correctness, or maintainability.
+- **Clear responsibilities:** Keep route pages, reusable components, hooks, API clients, contexts, and types in their documented architectural layers.
+- **Reuse existing code:** Inspect and reuse existing components, API modules, types, and utilities before creating new ones.
+- **No overengineering:** Create files, hooks, and components only when they provide a clear benefit. Do not split code into tiny components merely to reduce line counts.
+- **No speculative implementation:** Do not add placeholder components, unused hooks, future-phase functionality, or unsupported API integrations.
+- **Preserve working behavior:** Avoid unrelated refactoring and changes to existing functionality.
+- **Validate changes:** Run the relevant existing type-check and lint commands, and report any failures accurately.
+
+## 11. Scope Discipline and Development Cycle
 
 Work exclusively on the assigned task.
 
-**Strict Prohibitions:**
-* Do NOT add unrelated features.
-* Do NOT redesign working architecture.
-* Do NOT introduce premature optimizations.
-* Do NOT add speculative future-phase features.
-* Do NOT switch libraries or technologies without explicit instruction and blueprint alignment.
-* Do NOT create unnecessary files or duplicate code.
-* Do NOT refactor working, unrelated code.
+Do not add unrelated features, redesign working architecture, introduce premature optimizations, switch technologies without approval, or create duplicate implementations.
 
-### Mandatory Development Cycle:
-$$\text{Understand} \longrightarrow \text{Make Smallest Change} \longrightarrow \text{Run / Build} \longrightarrow \text{Manually Verify} \longrightarrow \text{Explain} \longrightarrow \text{Continue}$$
+Follow this cycle:
+
+**Understand → Inspect → Make the smallest necessary change → Validate → Manually verify → Report**
+
+## UI Design Ownership — Mandatory Rule
+
+The user has complete authority over all UI/UX decisions.
+
+- Do not invent or change colors, typography, spacing, layouts, shapes, borders, icons, animations, or responsive behavior without explicit user approval.
+- Preserve the approved ChatGPT-style dark theme, typography, and curved shapes.
+- Follow the user's approved design specifications exactly. Do not introduce unapproved visual improvements.
+- Keep functional changes separate from visual changes.
+- If a required design detail is undecided, ask the user before implementing it.
+- After implementation, report changed files and confirm whether any visual changes were made.

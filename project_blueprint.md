@@ -44,15 +44,14 @@ Source Citation Extraction & Mapping ──→ Final Answer + Citations
 # 2. Phase 1 Scope, User Roles, and Permissions
 
 ## 2.1 Included in Phase 1
-Phase 1 delivers the foundational RAG pipeline alongside planned authentication, chat persistence, and frontend UI:
+Phase 1 delivers the foundational RAG pipeline alongside authentication, chat persistence, prompt management, and frontend UI:
 * **Document Ingestion [Implemented]:** Multi-format file upload (PDF, TXT, DOCX), SHA-256 deduplication hashing, layout parsing via LlamaParse, structural Markdown chunking, and local filesystem storage.
 * **Vector Pipeline [Implemented]:** Local in-process embedding (`jina-embeddings-v2-small-en`, 512 dimensions) via Transformers.js, persistent storage in Supabase PostgreSQL (`pgvector`).
 * **Semantic Retrieval [Implemented]:** Cosine similarity retrieval (`<=>`) on ready document chunks using `PGVectorRetriever`.
-* **LLM Generation & Citations [Implemented]:** Multi-provider abstraction (Groq, Gemini, Ollama), dual-layer evidence sufficiency checking, grounded synthesis, and source citation extraction.
-* **Real-Time Visibility [Implemented]:** WebSocket streaming (`/ws`) of asynchronous document ingestion lifecycle events.
+* **Real-Time Visibility & Chat Streaming [Implemented]:** WebSocket server (`/ws`) providing real-time chat streaming (`chat.start`, `chat.token`, `chat.complete`, `chat.error`) with per-client JWT authentication and active conversation tracking, alongside broadcast document ingestion lifecycle events.
 * **User Authentication & RBAC [Implemented]:** User registration, login, stateless JWT issuance, and server-side role enforcement.
-* **Chat & History [Implemented]:** Multi-turn conversation threads, message persistence, citation linkage, 50-message limit with rollover, and conversation REST APIs.
-* **Prompt Management [Planned - Milestone 2]:** Database-backed prompt storage and administrative controls.
+* **Chat & History [Implemented]:** Multi-turn conversation threads, message persistence, citation linkage, 50-message limit with rollover, and conversation REST APIs alongside real-time WebSocket chat streaming.
+* **Prompt Management [Implemented]:** Database-backed prompt storage, administrative CRUD endpoints, and dynamic RAG generator integration.
 * **Frontend Web Application [Planned - Milestone 3]:** Next.js App Router UI for document upload, real-time ingestion tracking, and conversational Q&A.
 
 ## 2.2 Excluded from Phase 1
@@ -117,9 +116,9 @@ NNT_Rag/
 ### 3.1 Backend Module Ownership Breakdown
 * **`config/` [Implemented]:** Centralizes environment configuration parsing (`env.ts`) and RAG hyperparameters (`rag.ts`). No process variables are read outside this module.
 * **`database/` [Implemented]:** Owns the Drizzle ORM client, connection pooling to Supabase PostgreSQL, and declarative table schema definitions (`schema.ts`).
-* **`routes/` [Implemented]:** Thin HTTP routing layer (`documents.routes.ts`, `chat.routes.ts`, `conversation.routes.ts`, `auth.routes.ts`, `admin.routes.ts` [implemented]; `prompts.routes.ts` [planned]).
-* **`controllers/` [Implemented]:** Extracts request parameters, handles HTTP status codes, and delegates execution to services (`documents.controller.ts`, `chat.controller.ts`, `conversation.controller.ts`, `auth.controller.ts`, `admin.controller.ts` [implemented]).
-* **`services/` [Implemented]:** Implements core business logic, transactional database persistence, and orchestration (`document.service.ts`, `conversation.service.ts`, `auth.service.ts`, `admin.service.ts` [implemented]).
+* **`routes/` [Implemented]:** Thin HTTP routing layer (`documents.routes.ts`, `chat.routes.ts`, `conversation.routes.ts`, `auth.routes.ts`, `admin.routes.ts`, `prompts.routes.ts`).
+* **`controllers/` [Implemented]:** Extracts request parameters, handles HTTP status codes, and delegates execution to services (`documents.controller.ts`, `chat.controller.ts`, `conversation.controller.ts`, `auth.controller.ts`, `admin.controller.ts`, `prompts.controller.ts`).
+* **`services/` [Implemented]:** Implements core business logic, transactional database persistence, and orchestration (`document.service.ts`, `conversation.service.ts`, `auth.service.ts`, `admin.service.ts`, `prompts.service.ts`).
 * **`middleware/`:** Houses upload handling (`upload.middleware.ts` [implemented]), authentication guard (`auth.middleware.ts` [implemented]), role checking (`role.middleware.ts` [implemented]), and planned centralized error handling (`error.middleware.ts`).
 * **`validators/` [Planned]:** Zod schemas validating HTTP request bodies, query strings, and path parameters before execution.
 * **`providers/` [Implemented]:** Vendor-agnostic abstractions isolating LLM generation and embedding models behind clean contracts.
@@ -152,7 +151,8 @@ $$\text{HTTP Request} \longrightarrow \text{Route} \longrightarrow \text{Middlew
 | | `/api/documents/:id` | `DELETE`| `ADMIN` / `SUPER_ADMIN` | None | `{ message: string, documentId: string, filename: string }` | **Implemented** (JWT + RBAC protected) |
 | **Auth** | `/api/auth/register` | `POST` | Public | `{ email, password, name }` | `{ user: { id, email, role }, token }` | **Implemented** (Active route) |
 | | `/api/auth/login` | `POST` | Public | `{ email, password }` | `{ user: { id, email, role }, token }` | **Implemented** (Active route) |
-| **Chat** | `/api/chat` | `POST` | `USER` / `ADMIN` / `SUPER_ADMIN` | `{ query, documentId? }` | `{ answer, evidenceSufficient, citations, modelName, providerName }` | **Implemented** (JWT + RBAC protected) |
+| **Chat** | `/api/chat` | `POST` | `USER` / `ADMIN` / `SUPER_ADMIN` | `{ query, documentId?, conversationId?, systemPrompt? }` | `{ conversationId, answer, evidenceSufficient, refusalReason?, citations, modelName, providerName, remainingMessages, warning, isNewConversation }` | **Implemented** (JWT + RBAC protected) |
+| | `/ws` | `WS` | `USER` / `ADMIN` / `SUPER_ADMIN` | Client events: `auth`, `chat.send`, `chat.cancel` | Server events: `chat.start`, `chat.token`, `chat.complete`, `chat.error`, `document.*` | **Implemented** (JWT auth, client isolation) |
 | | `/api/conversations` | `GET` | `USER` / `ADMIN` / `SUPER_ADMIN` | None | `{ conversations: Conversation[] }` | **Implemented** (JWT + RBAC protected) |
 | | `/api/conversations/:id` | `GET` | `USER` / `ADMIN` / `SUPER_ADMIN` | None | `{ conversation: Conversation & { messages: Message[] }, messages: Message[] }` | **Implemented** (JWT + RBAC protected) |
 | | `/api/conversations/:id` | `DELETE` | `USER` / `ADMIN` / `SUPER_ADMIN` | None | `{ message: string, id: string }` | **Implemented** (JWT + RBAC protected) |
@@ -160,11 +160,14 @@ $$\text{HTTP Request} \longrightarrow \text{Route} \longrightarrow \text{Middlew
 | | `/api/admin/users/:id/role` | `PATCH` | `SUPER_ADMIN` | `{ role: RoleName }` | `{ message: string, user: SafeUser }` | **Implemented** (JWT + RBAC protected) |
 | | `/api/admin/users` | `POST` | `SUPER_ADMIN` | `{ name, email, password, role }` | `{ message: string, user: SafeUser }` | **Implemented** (JWT + RBAC protected) |
 | | `/api/admin/users/:id` | `DELETE` | `SUPER_ADMIN` | None | `{ message: string, user: SafeUser }` | **Implemented** (JWT + RBAC protected) |
-| **Prompts** | `/api/prompts` | `GET` | `ADMIN` | None | `Prompt[]` | Planned (Milestone 2) |
-| | `/api/prompts` | `POST` | `ADMIN` | `{ name, content, type }` | `Prompt` | Planned (Milestone 2) |
-| | `/api/prompts/:id` | `PUT` | `ADMIN` | `{ content?, status? }` | `Prompt` | Planned (Milestone 2) |
+| **Prompts** | `/api/prompts` | `GET` | `ADMIN` / `SUPER_ADMIN` | Query: `type?`, `status?` | `Prompt[]` | **Implemented** (JWT + RBAC protected) |
+| | `/api/prompts` | `POST` | `ADMIN` / `SUPER_ADMIN` | `{ name, content, type, status? }` | `Prompt` | **Implemented** (JWT + RBAC protected) |
+| | `/api/prompts/active/:type` | `GET` | `ADMIN` / `SUPER_ADMIN` | None | `Prompt` | **Implemented** (JWT + RBAC protected) |
+| | `/api/prompts/:id` | `GET` | `ADMIN` / `SUPER_ADMIN` | None | `Prompt` | **Implemented** (JWT + RBAC protected) |
+| | `/api/prompts/:id` | `PATCH` | `ADMIN` / `SUPER_ADMIN` | `{ content?, status?, name? }` | `Prompt` | **Implemented** (JWT + RBAC protected) |
+| | `/api/prompts/:id` | `DELETE` | `ADMIN` / `SUPER_ADMIN` | None | `{ message: string, id: string }` | **Implemented** (JWT + RBAC protected) |
 
-*\*Note: The core RAG generation pipeline (`generateAnswer` in `src/rag/generation/generator.ts`) is fully implemented; wrapping it into the `/api/chat` HTTP route with conversational message persistence is scheduled for Milestone 2.*
+*\*Note: The `/api/chat` route orchestrates `generateAnswer`, dynamic active system prompt lookup (with `systemPrompt` request override precedence), and transactional multi-turn session persistence in Supabase PostgreSQL (`conversations`, `messages`).*
 
 ### 4.3 Standard HTTP Response & Error Contracts
 * **Success Envelope (200 OK / 201 Created):**
@@ -316,7 +319,7 @@ export type NewMessage = typeof messages.$inferInsert;
 ```
 
 ## 6.2 Prompts Schema Entity (`src/database/schema.ts`)
-[Implemented in Phase 2 & Phase 3]
+[Implemented in Milestone 2]
 
 ```typescript
 // prompts: Admin-configured RAG and system prompts
@@ -548,14 +551,14 @@ export interface IngestionEvent {
 
 ---
 
-# 11. Authentication, Validation, and Security Contracts (Planned Milestone 2)
+# 11. Authentication, Validation, and Security Contracts (Implemented)
 
-The security architecture specifies requirements for the planned authentication and authorization layer (Milestone 2):
+The security architecture implements the following authentication, authorization, and validation safeguards:
 
 1. **Backend as Security Boundary:** Role verification, file validation, document authorization, and prompt management must be validated on Express routes. The frontend is never trusted as a security barrier.
 2. **Password Hashing:** Salted hashing via `bcrypt` (10 rounds). Plaintext passwords must never be logged or stored.
 3. **Session Tokens:** Stateless JWT tokens passed via `Authorization: Bearer <token>` containing payload `{ sub: userId, role: string, exp: number }`.
-4. **Input Validation (Architectural Contract):** Planned runtime controller input validation using strict Zod schemas with TypeScript type inference (`z.infer<typeof schema>`), to be wired into route middleware (`src/validators/`):
+4. **Input Validation (Architectural Contract):** Controller-level validation enforces required types, string trimming, regex patterns (email, UUID), and password constraints. Planned centralized runtime validation middleware using strict Zod schemas with TypeScript type inference (`z.infer<typeof schema>`), to be wired into route middleware (`src/validators/`):
    ```typescript
    export const uploadDocumentSchema = z.object({
      files: z.array(z.any()).min(1, "At least one file must be provided"),
@@ -594,6 +597,9 @@ The security architecture specifies requirements for the planned authentication 
 | `OLLAMA_BASE_URL` | Optional | `http://127.0.0.1:11434` | Local Ollama HTTP endpoint |
 | `OLLAMA_MODEL` | Optional | `hf.co/unsloth/Qwen3.5-0.8B-GGUF:Q4_K_M`| Default Ollama model |
 | `INGESTION_CONCURRENCY`| Optional | `3` | Parallel background document worker limit |
+| `SUPER_ADMIN_NAME` | Optional | `Super Admin` | Initial super admin display name for db seeding |
+| `SUPER_ADMIN_EMAIL` | Optional | `admin@nnt-rag.com` | Initial super admin email for db seeding |
+| `SUPER_ADMIN_PASSWORD` | Optional | `Admin@12345` | Initial super admin password (bcrypt hashed during seed) |
 
 ## 12.2 Development Rules (AGENTS.md)
 * **Smallest Clean Implementation:** Implement only what is directly requested. Never introduce speculative scaffolding or redundant wrapper layers.
@@ -636,7 +642,7 @@ The security architecture specifies requirements for the planned authentication 
 - [x] **Multi-Provider LLM Integration:** Flexible support for Groq, Gemini, and local Ollama.
 - [x] **Build Verification:** Zero TypeScript compilation errors (`npm run build`).
 
-### Milestone 2: Authentication, Chat Persistence & Administration (In Progress)
+### Milestone 2: Authentication, Chat Persistence & Administration (Implemented)
 - [x] **Authentication:** User registration/login with bcrypt hashing (10 salt rounds), server-side `USER` role assignment, stateless JWT issuance, and generic credential failure responses.
 - [x] **Super Admin Bootstrapping:** Idempotent database seeding (`npm run db:seed`) creates canonical roles and initial `SUPER_ADMIN` account with bcrypt-hashed credentials configured via environment variables.
 - [x] **RBAC Route Protection:** Server-side role middleware on protected endpoints (`auth.middleware.ts`, `role.middleware.ts`).

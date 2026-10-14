@@ -28,6 +28,11 @@ export interface GenerateAnswerOptions extends RetrieveOptions {
   retriever?: ((query: string, options?: RetrieveOptions) => Promise<RetrievedChunk[]>) | undefined;
 }
 
+export interface GenerateAnswerStreamOptions extends GenerateAnswerOptions {
+  onToken: (token: string) => void | Promise<void>;
+  signal?: AbortSignal | undefined;
+}
+
 
 export interface GenerateAnswerResult {
   answer: string;

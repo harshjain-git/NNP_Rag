@@ -2,8 +2,7 @@ import type { Request, Response } from "express";
 import { generateAnswer } from "../rag/generation/generator.js";
 import {
   prepareConversation,
-  saveExchange,
-  createConversation,
+  persistChatExchange,
   deleteConversation,
 } from "../services/conversation.service.js";
 import {
@@ -129,35 +128,18 @@ export const chatController = async (
     let warning: string | null = null;
 
     if (userId && finalConversationId) {
-      let saveRes = await saveExchange(
+      const persisted = await persistChatExchange(
         finalConversationId,
         userId,
         trimmedQuery,
         result.answer,
-        result.citations
+        result.citations,
+        isNewConversation
       );
-
-      // Concurrency safeguard: if concurrent request hit limit, rollover automatically
-      if ("error" in saveRes && saveRes.error === "limitExceeded") {
-        const newConv = await createConversation(
-          userId,
-          trimmedQuery.slice(0, CONVERSATION_TITLE_MAX_LENGTH)
-        );
-        finalConversationId = newConv.id;
-        finalIsNewConversation = true;
-        saveRes = await saveExchange(
-          finalConversationId,
-          userId,
-          trimmedQuery,
-          result.answer,
-          result.citations
-        );
-      }
-
-      if ("success" in saveRes) {
-        remainingMessages = saveRes.remainingMessages;
-        warning = saveRes.warning;
-      }
+      finalConversationId = persisted.finalConversationId;
+      finalIsNewConversation = persisted.isNewConversation;
+      remainingMessages = persisted.remainingMessages;
+      warning = persisted.warning;
     }
 
     res.status(200).json({

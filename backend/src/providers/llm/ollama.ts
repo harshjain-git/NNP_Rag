@@ -1,25 +1,34 @@
 import { OLLAMA_BASE_URL, OLLAMA_MODEL } from "../../config/env.js";
-import type { GenerateOptions, LLMProvider } from "./types.js";
+import { iterateLines } from "../../utils/stream.js";
+import type {
+  GenerateOptions,
+  LLMProvider,
+  StreamGenerateOptions,
+  TokenCallback,
+} from "./types.js";
 
 export class OllamaLLMProvider implements LLMProvider {
   readonly providerName = "ollama";
   readonly modelName: string;
   private readonly baseUrl: string;
 
-  constructor(
-    modelName: string = OLLAMA_MODEL,
-    baseUrl: string = OLLAMA_BASE_URL
-  ) {
+  constructor(modelName: string = OLLAMA_MODEL, baseUrl: string = OLLAMA_BASE_URL) {
     this.modelName = modelName;
     this.baseUrl = baseUrl.replace(/\/+$/, "");
   }
 
   async generate(prompt: string, options?: GenerateOptions): Promise<string> {
-    const messages: Array<{ role: string; content: string }> = [];
-    if (options?.systemPrompt) {
-      messages.push({ role: "system", content: options.systemPrompt });
-    }
-    messages.push({ role: "user", content: prompt });
+    return this.generateStream(prompt, () => {}, options);
+  }
+
+  async generateStream(
+    prompt: string,
+    onToken: TokenCallback,
+    options?: StreamGenerateOptions
+  ): Promise<string> {
+    const messages = options?.systemPrompt
+      ? [{ role: "system", content: options.systemPrompt }, { role: "user", content: prompt }]
+      : [{ role: "user", content: prompt }];
 
     const response = await fetch(`${this.baseUrl}/api/chat`, {
       method: "POST",
@@ -27,7 +36,7 @@ export class OllamaLLMProvider implements LLMProvider {
       body: JSON.stringify({
         model: this.modelName,
         messages,
-        stream: false,
+        stream: true,
         think: false,
         options: {
           temperature: options?.temperature ?? 0.1,
@@ -35,28 +44,43 @@ export class OllamaLLMProvider implements LLMProvider {
           repeat_penalty: 1.15,
         },
       }),
+      signal: options?.signal ?? null,
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Ollama API request failed [${response.status}]: ${errorText}`);
+      throw new Error(`Ollama API request failed [${response.status}]: ${await response.text()}`);
     }
 
-    const data = (await response.json()) as {
-      message?: { content?: string; thinking?: string };
-    };
+    if (!response.body) {
+      throw new Error("Ollama API returned an empty response body");
+    }
 
-    // Extract only the final response content (never fall back to thinking tokens)
-    let content = data.message?.content?.trim() || "";
+    let fullText = "";
+    for await (const line of iterateLines(response.body)) {
+      if (options?.signal?.aborted) break;
+      const trimmed = line.trim();
+      if (!trimmed) continue;
 
-    // Strip any lingering reasoning blocks (e.g. <think>...</think>) if present
-    content = content.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+      try {
+        const parsed = JSON.parse(trimmed) as {
+          message?: { content?: string };
+          done?: boolean;
+        };
+        const token = parsed.message?.content;
+        if (token) {
+          fullText += token;
+          await onToken(token);
+        }
+        if (parsed.done) break;
+      } catch {}
+    }
 
-    if (!content) {
+    fullText = fullText.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+    if (!fullText) {
       throw new Error("Ollama API returned an empty or invalid response");
     }
 
-    return content;
+    return fullText;
   }
 }
 

@@ -11,41 +11,30 @@ import { promptsService } from "../../services/prompts.service.js";
 import type {
   Citation,
   GenerateAnswerOptions,
+  GenerateAnswerStreamOptions,
   GenerateAnswerResult,
 } from "./types.js";
 
-
-const extractCitations = (
+export const extractCitations = (
   answerText: string,
   retrievedChunks: RetrievedChunk[]
 ): Citation[] => {
-  const sourceMatches = Array.from(
-    answerText.matchAll(/\[Source\s+(\d+)\]/gi)
-  );
-
+  const sourceMatches = Array.from(answerText.matchAll(/\[Source\s+(\d+)\]/gi));
   const citedIndices = new Set<number>();
+
   for (const match of sourceMatches) {
-    const numStr = match[1];
-    if (numStr) {
-      const num = Number.parseInt(numStr, 10);
-      if (!Number.isNaN(num) && num >= 1 && num <= retrievedChunks.length) {
-        citedIndices.add(num - 1);
-      }
+    const num = Number.parseInt(match[1] || "", 10);
+    if (!Number.isNaN(num) && num >= 1 && num <= retrievedChunks.length) {
+      citedIndices.add(num - 1);
     }
   }
 
-  // If specific sources were cited in the answer, map those; otherwise map all retrieved chunks
-  const targetChunks: RetrievedChunk[] = [];
-  if (citedIndices.size > 0) {
-    for (const idx of citedIndices) {
-      const chunk = retrievedChunks[idx];
-      if (chunk) {
-        targetChunks.push(chunk);
-      }
-    }
-  } else {
-    targetChunks.push(...retrievedChunks);
-  }
+  const targetChunks =
+    citedIndices.size > 0
+      ? Array.from(citedIndices)
+          .map((idx) => retrievedChunks[idx]!)
+          .filter(Boolean)
+      : retrievedChunks;
 
   return targetChunks.map((chunk) => ({
     documentId: chunk.documentId,
@@ -61,12 +50,16 @@ const extractCitations = (
   }));
 };
 
-export const generateAnswer = async (
+/**
+ * Streams answer tokens while checking for sufficiency, building RAG prompt, and extracting citations.
+ */
+export const generateAnswerStream = async (
   query: string,
-  options?: GenerateAnswerOptions
+  options: GenerateAnswerStreamOptions
 ): Promise<GenerateAnswerResult> => {
   const trimmedQuery = query.trim();
   if (!trimmedQuery) {
+    await options.onToken(DEFAULT_INSUFFICIENT_EVIDENCE_MESSAGE);
     return {
       answer: DEFAULT_INSUFFICIENT_EVIDENCE_MESSAGE,
       evidenceSufficient: false,
@@ -91,38 +84,34 @@ export const generateAnswer = async (
   const retrievedChunks = await retrieveFn(trimmedQuery, retrieveOpts);
 
   // 2. Pre-generation evidence sufficiency check
-  const minScore =
-    options?.minSufficiencyScore ?? DEFAULT_MIN_SUFFICIENCY_SCORE;
+  const minScore = options?.minSufficiencyScore ?? DEFAULT_MIN_SUFFICIENCY_SCORE;
   const sufficiency = checkEvidenceSufficiency(retrievedChunks, minScore);
 
   if (!sufficiency.isSufficient) {
-    const result: GenerateAnswerResult = {
+    await options.onToken(DEFAULT_INSUFFICIENT_EVIDENCE_MESSAGE);
+    return {
       answer: DEFAULT_INSUFFICIENT_EVIDENCE_MESSAGE,
       evidenceSufficient: false,
+      refusalReason: sufficiency.reason,
       citations: [],
       retrievedChunks,
       modelName: provider.modelName,
       providerName: provider.providerName,
     };
-    if (sufficiency.reason !== undefined) {
-      result.refusalReason = sufficiency.reason;
-    }
-    return result;
   }
 
-  // 3. Resolve system prompt (explicit override > active DB prompt > default fallback)
+  // 3. Resolve system prompt
   let systemPrompt = options?.systemPrompt;
   if (!systemPrompt) {
     try {
       const activePrompt = await promptsService.getActivePrompt("system");
       systemPrompt = activePrompt?.content || DEFAULT_RAG_SYSTEM_PROMPT;
-    } catch (error) {
-      console.warn("Failed to retrieve active system prompt, falling back to default:", error);
+    } catch {
       systemPrompt = DEFAULT_RAG_SYSTEM_PROMPT;
     }
   }
 
-  // 4. Build strictly grounded prompt
+  // 4. Build prompt
   const { systemPrompt: finalSystemPrompt, userPrompt } = buildRAGPrompt(
     trimmedQuery,
     retrievedChunks,
@@ -130,25 +119,58 @@ export const generateAnswer = async (
     options?.conversationHistory
   );
 
-  // 5. Generate answer via configured LLM provider
-  const rawResponse = await provider.generate(userPrompt, {
-    systemPrompt: finalSystemPrompt,
-    temperature: options?.temperature ?? 0.1,
-    maxTokens: options?.maxTokens ?? 1024,
-  });
+  // 5. Generate and stream tokens with sentinel filtering
+  const SENTINEL = "INSUFFICIENT_EVIDENCE:";
+  let rawResponse = "";
+  let buffer = "";
+  let isSentinel = false;
 
-  // 5. Check if LLM returned insufficient evidence sentinel
-  const insufficientMatch = rawResponse.match(
-    /^INSUFFICIENT_EVIDENCE:\s*(.*)/is
-  );
-  if (insufficientMatch) {
-    const refusalReason =
-      insufficientMatch[1]?.trim() ||
-      "The retrieved documents do not contain sufficient evidence to answer this question.";
+  const handleToken = async (token: string) => {
+    rawResponse += token;
+    if (isSentinel) return;
+
+    if (buffer.length < SENTINEL.length) {
+      buffer += token;
+      if (SENTINEL.startsWith(buffer.trimStart())) {
+        if (buffer.trimStart().startsWith(SENTINEL)) isSentinel = true;
+        return;
+      }
+      const toFlush = buffer;
+      buffer = "";
+      await options.onToken(toFlush);
+    } else {
+      await options.onToken(token);
+    }
+  };
+
+  if (typeof provider.generateStream === "function") {
+    await provider.generateStream(userPrompt, handleToken, {
+      systemPrompt: finalSystemPrompt,
+      temperature: options?.temperature ?? 0.1,
+      maxTokens: options?.maxTokens ?? 1024,
+      signal: options?.signal,
+    });
+  } else {
+    rawResponse = await provider.generate(userPrompt, {
+      systemPrompt: finalSystemPrompt,
+      temperature: options?.temperature ?? 0.1,
+      maxTokens: options?.maxTokens ?? 1024,
+    });
+    if (!rawResponse.startsWith(SENTINEL)) {
+      await options.onToken(rawResponse);
+    }
+  }
+
+  // 6. Check for insufficient evidence sentinel from LLM
+  const match = rawResponse.match(/^INSUFFICIENT_EVIDENCE:\s*(.*)/is);
+  if (match) {
+    await options.onToken(DEFAULT_INSUFFICIENT_EVIDENCE_MESSAGE);
     return {
       answer: DEFAULT_INSUFFICIENT_EVIDENCE_MESSAGE,
       evidenceSufficient: false,
-      refusalReason,
+      refusalReason:
+        match[1]?.trim() ||
+        "The retrieved documents do not contain sufficient evidence to answer this question.",
       citations: [],
       retrievedChunks,
       modelName: provider.modelName,
@@ -156,7 +178,11 @@ export const generateAnswer = async (
     };
   }
 
-  // 6. Grounded answer with citations
+  if (buffer.length > 0 && !isSentinel) {
+    await options.onToken(buffer);
+  }
+
+  // 7. Extract citations
   const citations = extractCitations(rawResponse, retrievedChunks);
 
   return {
@@ -167,4 +193,18 @@ export const generateAnswer = async (
     modelName: provider.modelName,
     providerName: provider.providerName,
   };
+};
+
+/**
+ * Standard non-streaming RAG question answering.
+ * Directly reuses generateAnswerStream with a no-op token callback.
+ */
+export const generateAnswer = async (
+  query: string,
+  options?: GenerateAnswerOptions
+): Promise<GenerateAnswerResult> => {
+  return generateAnswerStream(query, {
+    ...options,
+    onToken: () => {},
+  });
 };

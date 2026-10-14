@@ -1,10 +1,11 @@
 import { WebSocketServer, WebSocket } from "ws";
-import type { Server as HttpServer } from "node:http";
+import type { Server as HttpServer, IncomingMessage } from "node:http";
 import type {
   IngestionEvent,
   IngestionEventType,
   IngestionEventPayload,
 } from "./events.js";
+import { handleClientConnection, verifyAuthToken } from "./chat.handler.js";
 
 let wss: WebSocketServer | null = null;
 
@@ -17,10 +18,26 @@ export const initRealtimeServer = (
 ): WebSocketServer => {
   wss = new WebSocketServer({ server, path });
 
-  wss.on("connection", (ws: WebSocket) => {
+  wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     ws.on("error", (err) => {
       console.error("WebSocket client connection error:", err);
     });
+
+    // Extract optional token from URL query string (?token=...)
+    let initialUser: { id: string; role: string } | null = null;
+    if (req.url) {
+      try {
+        const url = new URL(req.url, "http://localhost");
+        const token = url.searchParams.get("token");
+        if (token) {
+          initialUser = verifyAuthToken(token);
+        }
+      } catch {
+        // Ignore URL parsing errors
+      }
+    }
+    // Attach chat streaming message handling and session isolation
+    handleClientConnection(ws, initialUser);
 
     // Send initial handshake acknowledgment
     ws.send(
@@ -81,6 +98,9 @@ export const getConnectedClientsCount = (): number => {
  */
 export const closeRealtimeServer = async (): Promise<void> => {
   if (!wss) return;
+  for (const client of wss.clients) {
+    client.terminate();
+  }
   return new Promise((resolve, reject) => {
     wss!.close((err) => {
       if (err) reject(err);
