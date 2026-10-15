@@ -1,6 +1,6 @@
 # NNT RAG — Project Blueprint
 
-> **Project Status:** Phase 1 — Foundation & Document Q&A  
+> **Project Status:** Phase 1 Complete — Full Stack Document Q&A, Admin & User Management, Configuration, and Real-Time Frontend UI  
 > **Source of Truth:** Authoritative architectural specification, technology selections, data contracts, and scope boundaries for NNT RAG. All implementations, modifications, and AI agent contributions must strictly conform to this document.
 
 ---
@@ -49,10 +49,10 @@ Phase 1 delivers the foundational RAG pipeline alongside authentication, chat pe
 * **Vector Pipeline [Implemented]:** Local in-process embedding (`jina-embeddings-v2-small-en`, 512 dimensions) via Transformers.js, persistent storage in Supabase PostgreSQL (`pgvector`).
 * **Semantic Retrieval [Implemented]:** Cosine similarity retrieval (`<=>`) on ready document chunks using `PGVectorRetriever`.
 * **Real-Time Visibility & Chat Streaming [Implemented]:** WebSocket server (`/ws`) providing real-time chat streaming (`chat.start`, `chat.token`, `chat.complete`, `chat.error`) with per-client JWT authentication and active conversation tracking, alongside broadcast document ingestion lifecycle events.
-* **User Authentication & RBAC [Implemented]:** User registration, login, stateless JWT issuance, and server-side role enforcement.
-* **Chat & History [Implemented]:** Multi-turn conversation threads, message persistence, citation linkage, 50-message limit with rollover, and conversation REST APIs alongside real-time WebSocket chat streaming.
+* **User Authentication & RBAC [Implemented]:** User registration, login, profile management, password updates, stateless JWT issuance, and server-side role enforcement.
+* **Chat & History [Implemented]:** Multi-turn conversation threads, message persistence, citation linkage, 50-message limit with rollover, conversation deletion with cascade cleanup, and conversation REST APIs alongside real-time WebSocket chat streaming.
 * **Prompt Management [Implemented]:** Database-backed prompt storage, administrative CRUD endpoints, and dynamic RAG generator integration.
-* **Frontend Web Application [Planned - Milestone 3]:** Next.js App Router UI for document upload, real-time ingestion tracking, and conversational Q&A.
+* **Frontend Web Application [Implemented - Milestone 3]:** Complete Next.js App Router UI featuring responsive ChatGPT dark theme, real-time WebSocket document ingestion progress, conversational Q&A with Source Inspector drawer, prompt management, Super Admin user & runtime configuration consoles, user profile editing, account settings, and accessible logout confirmation.
 
 ## 2.2 Excluded from Phase 1
 The following are intentionally excluded to maintain architectural simplicity: microservices, Kubernetes, Kafka, Redis/caching, standalone vector databases (Pinecone/Milvus), cloud object storage (S3), OCR scanning for handwritten documents, hybrid BM25 search, cross-encoder reranking, query rewriting, and enterprise SSO.
@@ -151,6 +151,9 @@ $$\text{HTTP Request} \longrightarrow \text{Route} \longrightarrow \text{Middlew
 | | `/api/documents/:id` | `DELETE`| `ADMIN` / `SUPER_ADMIN` | None | `{ message: string, documentId: string, filename: string }` | **Implemented** (JWT + RBAC protected) |
 | **Auth** | `/api/auth/register` | `POST` | Public | `{ email, password, name }` | `{ user: { id, email, role }, token }` | **Implemented** (Active route) |
 | | `/api/auth/login` | `POST` | Public | `{ email, password }` | `{ user: { id, email, role }, token }` | **Implemented** (Active route) |
+| | `/api/auth/me` | `GET` | Authenticated | None | `{ user: SafeUser }` | **Implemented** (JWT protected) |
+| | `/api/auth/profile` | `PATCH` | Authenticated | `{ name: string }` | `{ message: string, user: SafeUser }` | **Implemented** (JWT protected) |
+| | `/api/auth/password` | `PATCH` | Authenticated | `{ currentPassword, newPassword }` | `{ message: string }` | **Implemented** (JWT protected) |
 | **Chat** | `/api/chat` | `POST` | `USER` / `ADMIN` / `SUPER_ADMIN` | `{ query, documentId?, conversationId?, systemPrompt? }` | `{ conversationId, answer, evidenceSufficient, refusalReason?, citations, modelName, providerName, remainingMessages, warning, isNewConversation }` | **Implemented** (JWT + RBAC protected) |
 | | `/ws` | `WS` | `USER` / `ADMIN` / `SUPER_ADMIN` | Client events: `auth`, `chat.send`, `chat.cancel` | Server events: `chat.start`, `chat.token`, `chat.complete`, `chat.error`, `document.*` | **Implemented** (JWT auth, client isolation) |
 | | `/api/conversations` | `GET` | `USER` / `ADMIN` / `SUPER_ADMIN` | None | `{ conversations: Conversation[] }` | **Implemented** (JWT + RBAC protected) |
@@ -160,6 +163,8 @@ $$\text{HTTP Request} \longrightarrow \text{Route} \longrightarrow \text{Middlew
 | | `/api/admin/users/:id/role` | `PATCH` | `SUPER_ADMIN` | `{ role: RoleName }` | `{ message: string, user: SafeUser }` | **Implemented** (JWT + RBAC protected) |
 | | `/api/admin/users` | `POST` | `SUPER_ADMIN` | `{ name, email, password, role }` | `{ message: string, user: SafeUser }` | **Implemented** (JWT + RBAC protected) |
 | | `/api/admin/users/:id` | `DELETE` | `SUPER_ADMIN` | None | `{ message: string, user: SafeUser }` | **Implemented** (JWT + RBAC protected) |
+| | `/api/admin/config` | `GET` | `SUPER_ADMIN` | None | `{ config: ProjectConfig }` | **Implemented** (JWT + RBAC protected) |
+| | `/api/admin/config` | `PATCH` | `SUPER_ADMIN` | `Partial<ProjectConfig>` | `{ message: string, config: ProjectConfig }` | **Implemented** (JWT + RBAC protected) |
 | **Prompts** | `/api/prompts` | `GET` | `ADMIN` / `SUPER_ADMIN` | Query: `type?`, `status?` | `Prompt[]` | **Implemented** (JWT + RBAC protected) |
 | | `/api/prompts` | `POST` | `ADMIN` / `SUPER_ADMIN` | `{ name, content, type, status? }` | `Prompt` | **Implemented** (JWT + RBAC protected) |
 | | `/api/prompts/active/:type` | `GET` | `ADMIN` / `SUPER_ADMIN` | None | `Prompt` | **Implemented** (JWT + RBAC protected) |
@@ -625,11 +630,12 @@ The security architecture implements the following authentication, authorization
 | **Grounded Answer & Citations**| **Implemented** | Strict grounding prompt, source tag extraction, metadata citation resolution. |
 | **Realtime WebSockets** | **Implemented** | Mounted on `/ws`, broadcasts 6 ingestion lifecycle events. |
 | **Chat HTTP Endpoint** | **Implemented** | Express endpoint `POST /api/chat` with input validation (including optional `systemPrompt` override forwarding), error handling, evidence sufficiency gating, and citations. |
-| **Conversation Persistence**| **Implemented** | Database tables (`conversations`, `messages`), multi-turn session persistence service. |
-| **User Authentication & RBAC** | **Implemented** | Registration & login active with bcrypt (10 rounds), JWT issuance, and route protection middleware (`auth.middleware.ts`, `role.middleware.ts`). |
+| **Conversation Persistence**| **Implemented** | Database tables (`conversations`, `messages`), multi-turn session persistence service, cascading deletion. |
+| **User Authentication & RBAC** | **Implemented** | Registration, login, profile editing, password change with bcrypt (10 rounds), JWT issuance, and route protection middleware (`auth.middleware.ts`, `role.middleware.ts`). |
 | **Prompt Management API** | **Implemented** | Database table (`prompts`), admin CRUD endpoints (`/api/prompts`) for system/RAG prompt overrides. |
 | **RAG Prompt Generator Integration** | **Implemented** | Dynamic active system prompt lookup in `generateAnswer` with graceful fallback to `DEFAULT_RAG_SYSTEM_PROMPT` and explicit override precedence. |
-| **Next.js Frontend UI** | **Planned** | Initial Next.js starter setup; document upload UI and chat interface pending. |
+| **Project Runtime Configuration** | **Implemented** | Endpoints (`GET/PATCH /api/admin/config`) with disk persistence (`runtime-settings.json`), in-memory sync, and runtime provider/model/concurrency/chunking updates. |
+| **Next.js Frontend UI** | **Implemented** | Complete production Next.js App Router UI with Chat, Ingestion telemetry, Prompt & Super Admin consoles, User Profile, Settings, and Dark Theme. |
 
 ## 13.2 Acceptance Criteria by Milestone
 
@@ -651,13 +657,17 @@ The security architecture implements the following authentication, authorization
 - [x] **Chat HTTP Route:** Express endpoint `/api/chat` orchestrating `generateAnswer` with conversation persistence and explicit system prompt override support.
 - [x] **Prompt Administration API:** Database-backed prompt storage and administrative CRUD endpoints (`/api/prompts`).
 - [x] **RAG Generator Prompt Integration:** Dynamic resolution of active system prompt from database with fallback to default on absence or failure, preserving strict grounding and citation behavior.
-- [x] **Document Lifecycle Management:** Document deletion endpoint (`DELETE /api/documents/:id`) with cascading chunk removal.
+- [x] **Document Lifecycle Management:** Document deletion endpoint (`DELETE /api/documents/:id`) with cascading chunk removal and local file cleanup.
 
-
-### Milestone 3: Next.js Frontend Web Application (Planned)
-- [ ] **Document Upload Interface:** Drag-and-drop file upload with real-time WebSocket progress bars.
-- [ ] **Chat Interface:** Interactive conversational UI rendering grounded responses with clickable citation popovers and source text snippets.
-- [ ] **Administration Console:** Prompt template management and document registry.
+### Milestone 3: Next.js Frontend Web Application (Implemented)
+- [x] **Document Management Interface (`/documents`):** Drag-and-drop multi-file upload dropzone, real-time WebSocket progress bars tracking parsing/chunking/embedding stages, document table with status badges, and document deletion.
+- [x] **Interactive Conversational UI (`/`):** Full multi-turn chat experience with prompt suggestions, assistant/user bubbles, markdown and code blocks, copy action, and grounded responses.
+- [x] **Source Inspector & Citations:** Interactive citation badges on assistant messages opening a focused side drawer displaying source document name, page number, similarity score, and exact retrieved chunk text excerpt.
+- [x] **Prompt Administration Console (`/admin`):** Admin & Super Admin interface for creating, reviewing, editing, toggling active status, and deleting system and RAG prompt templates.
+- [x] **Super Admin Management & Configuration (`/admin/super`):** Dedicated console featuring administrative user provisioning, role promotion/demotion, user deletion, and dynamic project runtime settings (LLM provider, model, temperature, topK, similarity threshold, chunk size, overlap, concurrency).
+- [x] **Chat History Management:** Collapsible sidebar with conversation listing, three-dot options menu, confirmation modal for conversation deletion, cascading database message cleanup, and active chat reset.
+- [x] **Profile & Account Settings (`/profile`, `/settings`):** User profile view with display name editing, and account settings with secure current password verification and bcrypt-hashed password updating.
+- [x] **Logout Flow & Confirmation:** Accessible confirmation dialog before terminating session, leaving session intact on cancel, and cleaning credentials on confirmation.
 
 ---
 
@@ -671,6 +681,17 @@ The security architecture implements the following authentication, authorization
 * **2026-10-08 — Dual-Layer Evidence Sufficiency & Citations:** Implemented pre-generation similarity gating (threshold `0.65`) combined with LLM sentinel refusal parsing (`INSUFFICIENT_EVIDENCE:`) to systematically mitigate hallucinations, refuse out-of-domain queries, and attach verifiable source citations.
 * **2026-10-08 — Ollama Provider Integration & Provider Symmetry:** Integrated local Ollama provider with installed model `hf.co/unsloth/Qwen3.5-0.8B-GGUF:Q4_K_M` alongside Groq and Gemini, featuring configurable environment selection and reasoning-stream support.
 * **2026-10-13 — Dynamic RAG System Prompt Integration:** Integrated active system prompt selection into `generator.ts` with explicit option override precedence, single-query lookup via `promptsService.getActivePrompt("system")`, graceful fallback to `DEFAULT_RAG_SYSTEM_PROMPT` on query error or absence, and zero disturbance to retrieval, evidence gating, and citation mapping.
+* **2026-10-15 — Dynamic Project Runtime Configuration:** Introduced `runtime-settings.json` backed by `config.service.ts` allowing Super Admins to adjust active LLM provider, models, temperature, retrieval topK, similarity thresholds, and concurrency at runtime without restarting the server.
+* **2026-10-15 — Reusable AppLayout Shell:** Created lightweight layout wrapper (`AppLayout`) for Next.js secondary views (`/profile`, `/settings`), drastically reducing duplicate sidebar/topbar boilerplate while preserving responsive state and authentication gates.
+* **2026-10-15 — Server-Side User Profile & Password Security:** Added `/api/auth/me`, `/api/auth/profile`, and `/api/auth/password` with server-side bcrypt password verification and rehashing, enforcing strict separation between non-privileged user fields and role assignment.
 
-## 14.2 Future Scope (Phase 2+)
+## 14.2 Remaining & Future Scope (Phase 2+)
+While Phase 1 core functionality is 100% complete, the following improvements and advanced capabilities are identified for Phase 2:
+1. **Frontend Token-by-Token Chat Streaming:** Upgrading frontend chat reception from discrete JSON request/response to live character-by-character token streaming over WebSockets or Server-Sent Events (SSE).
+2. **Centralized Zod Validation Middleware:** Migrating controller-level inline request validation into centralized Express middleware schemas under `src/validators/`.
+3. **Centralized Express Error Middleware:** Consolidating HTTP error envelope serialization into an application-wide Express error handler (`error.middleware.ts`).
+4. **Cloud Object Storage:** Replacing local filesystem storage (`backend/uploads/`) with AWS S3 or Supabase Storage for multi-instance scaling.
+5. **Hybrid Search & Advanced Retrieval:** Combining lexical keyword search (BM25 / pg_trgm) with pgvector semantic search, followed by cross-encoder reranking (Cohere / BGE).
+6. **In-Browser Document Preview:** Embedding an interactive PDF viewer directly inside the Source Inspector Drawer to display the highlighted source page alongside the text snippet.
+7. **Search & Pagination Filters:** Adding keyword search filters to conversation history in the sidebar and paginating large user lists in the Super Admin console.
 Cloud object storage (S3/Supabase Storage), hybrid BM25 + vector search, cross-encoder reranking, query rewriting, conversation-aware retrieval, prompt versioning, streaming LLM responses over WebSockets/SSE, and automated RAG evaluation benchmarking.

@@ -68,82 +68,88 @@ frontend/
 
 ## 3. Proposed Modular Folder Structure
 
-To scale the application cleanly without introducing unnecessary abstractions or speculative scaffolding, the codebase will be organized into feature-driven modules under `frontend/src/`:
+To scale the application cleanly without introducing unnecessary abstractions or speculative scaffolding, the codebase is organized into feature-driven modules under `frontend/src/`:
 
 ```text
 frontend/src/
 ├── app/                           # Next.js App Router: Thin Route Shells & Layouts
 │   ├── layout.tsx                 # Root layout with Geist font & AuthProvider
 │   ├── globals.css                # Global styles & Tailwind v4 imports
-│   ├── page.tsx                   # Main Chat Dashboard view
+│   ├── page.tsx                   # Main Chat Dashboard view (conversations, suggestions, composer)
 │   ├── login/
 │   │   └── page.tsx               # Authentication: Login view
 │   ├── register/
 │   │   └── page.tsx               # Authentication: Register view
-│   ├── documents/                 # Document Management view (Phase 3)
+│   ├── documents/                 # Document Management view (Upload dropzone & real-time table)
 │   │   └── page.tsx
-│   └── admin/                     # Administration & Prompts view (Phase 4)
-│       └── page.tsx
+│   ├── admin/                     # Administration & Prompts view
+│   │   ├── page.tsx               # Prompt management panel
+│   │   └── super/
+│   │       └── page.tsx           # Super Admin Console (User Management & Project Configuration)
+│   ├── profile/
+│   │   └── page.tsx               # User Profile view (Account details & display name update)
+│   └── settings/
+│       └── page.tsx               # Account Settings view (Account overview & password change)
 │
 ├── components/                    # Component Architecture
 │   ├── ui/                        # Reusable Primitive Design System Components
-│   │   ├── button.tsx             # Rounded pill & secondary action buttons
-│   │   ├── input.tsx              # Curved input fields with focus & error styling
-│   │   ├── modal.tsx              # Generously rounded dialog backdrop
-│   │   ├── popover.tsx            # Floating curved popup menus
-│   │   └── icons.tsx              # Unified, zero-dependency inline SVG icons
+│   │   ├── icons.tsx              # Unified, zero-dependency inline SVG icons
+│   │   └── ...                    # Form controls and indicators
 │   │
 │   ├── layout/                    # Application Shell Structure
-│   │   ├── sidebar.tsx            # Collapsible desktop sidebar & mobile drawer
-│   │   ├── topbar.tsx             # Header bar with breadcrumbs & collapse triggers
-│   │   └── user-profile-menu.tsx  # Bottom-left user popover (Profile, Settings, Logout)
+│   │   ├── app-layout.tsx         # DRY application layout shell for secondary views
+│   │   ├── sidebar.tsx            # Collapsible sidebar, chat history, 3-dot menu, delete modal
+│   │   ├── topbar.tsx             # Header bar with breadcrumbs & sidebar toggle triggers
+│   │   └── user-profile-menu.tsx  # Bottom-left user popover with logout confirmation dialog
 │   │
 │   ├── chat/                      # Chat Feature Domain
-│   │   ├── welcome-screen.tsx     # "Ask your documents" heading & 4 suggestion cards
+│   │   ├── welcome-screen.tsx     # "Ask your documents" heading & suggestion prompt cards
 │   │   ├── message-list.tsx       # Message history stream container
-│   │   ├── message-item.tsx       # User & Assistant bubbles with markdown rendering
+│   │   ├── message-item.tsx       # User & Assistant bubbles with citation triggers
 │   │   ├── citation-badge.tsx     # Curved badge displaying document name & page
-│   │   ├── citation-drawer.tsx    # Source citation viewer with excerpt & similarity
+│   │   ├── citation-drawer.tsx    # Source citation viewer with excerpt, similarity & metadata
 │   │   └── composer.tsx           # Generously rounded message input & action bar
 │   │
 │   ├── documents/                 # Document Management Domain
-│   │   ├── document-table.tsx     # Table of ingested files, chunk count, status
-│   │   ├── upload-dropzone.tsx    # Drag-and-drop file upload with validation
-│   │   └── ingestion-badge.tsx    # Status indicator (uploaded, processing, ready, failed)
+│   │   ├── document-table.tsx     # Table of ingested files, chunk count, status badges, deletion
+│   │   └── upload-dropzone.tsx    # Drag-and-drop file upload with validation
 │   │
 │   └── admin/                     # Administration Domain
-│       ├── user-management.tsx    # User list, role update modal, deletion
-│       └── prompt-management.tsx  # System and RAG prompt configuration panel
+│       ├── user-management.tsx    # Super Admin user table, role assignment modal, deletion modal
+│       ├── prompt-management.tsx  # System and RAG prompt editor and status management
+│       └── project-configuration.tsx # Dynamic project runtime settings editor
 │
 ├── context/                       # Application State
-│   └── AuthContext.tsx            # Existing pure useSyncExternalStore provider
+│   └── AuthContext.tsx            # Pure useSyncExternalStore provider (token, user, updateUser)
 │
 ├── hooks/                         # Domain Logic & API Orchestration Hooks
 │   ├── useChat.ts                 # Chat lifecycle: sending queries, citations, active conversation
 │   ├── useConversations.ts        # Conversation listing, switching, deletion
-│   ├── useDocuments.ts            # Document list, upload mutations, deletion
-│   └── useAdmin.ts                # Admin user operations & prompt engineering mutations
+│   ├── useDocuments.ts            # Document list, upload mutations, deletion, WebSocket telemetry
+│   ├── usePrompts.ts              # Prompt CRUD operations and active status toggling
+│   ├── useAdminUsers.ts           # Super Admin user provisioning, role promotion, deletion
+│   └── useProjectConfig.ts        # Super Admin runtime configuration state & synchronization
 │
-├── lib/                           # Existing API Clients & Utilities (Preserved)
+├── lib/                           # Typed API Clients & Utilities
 │   └── api/
-│       ├── client.ts
-│       ├── auth.ts
-│       ├── chat.ts
-│       ├── conversations.ts
-│       ├── documents.ts
-│       ├── prompts.ts
-│       ├── admin.ts
-│       └── index.ts
+│       ├── client.ts              # Fetch wrapper with Bearer token & ApiClientError
+│       ├── auth.ts                # Login, register, profile, password change
+│       ├── chat.ts                # /api/chat query dispatcher
+│       ├── conversations.ts       # /api/conversations CRUD
+│       ├── documents.ts           # /api/documents upload & query
+│       ├── prompts.ts             # /api/prompts admin management
+│       ├── admin.ts               # /api/admin/users and /api/admin/config
+│       └── index.ts               # Barrel export
 │
-└── types/                         # TypeScript Contracts (Preserved)
-    ├── auth.ts
-    ├── chat.ts
-    ├── conversations.ts
-    ├── documents.ts
-    ├── prompts.ts
-    ├── admin.ts
-    ├── events.ts
-    └── index.ts
+└── types/                         # TypeScript Contracts
+    ├── auth.ts                    # User, SafeUser, Payloads, Profile & Password types
+    ├── chat.ts                    # Citation, ChatRequest, ChatResponse
+    ├── conversations.ts           # Conversation, Message, Response envelopes
+    ├── documents.ts               # DocumentItem, DocumentStatus, Upload response
+    ├── prompts.ts                 # PromptItem, PromptType, PromptStatus
+    ├── admin.ts                   # AdminUser & ProjectConfig types
+    ├── events.ts                  # IngestionEvent contracts
+    └── index.ts                   # Barrel export with ApiErrorResponse
 ```
 
 ---
@@ -285,7 +291,7 @@ The visual identity must maintain strict continuity with the approved authentica
 
 ---
 
-## 8. Phased Implementation Roadmap
+## 8. Phased Implementation Roadmap & Current Status
 
 ```
 ┌─────────────────────────────────┐
@@ -298,55 +304,64 @@ The visual identity must maintain strict continuity with the approved authentica
                  │
                  ▼
 ┌─────────────────────────────────┐
-│ Phase 2: Shell Refactoring &    │
-│          Chat Integration       │
-│ • Decompose page.tsx            │
-│ • useChat Hook & Citations UI   │
-│ • Multi-turn conversation sync  │
+│ Phase 2: Chat Integration       │
+│          & Citations (Completed)│
+│ • Decomposed modular shell      │
+│ • Welcome screen suggestions    │
+│ • Clickable Source Inspector    │
 └────────────────┬────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────┐
-│ Phase 3: Document Management    │
+│ Phase 3: Ingestion Telemetry    │
+│          & Documents (Completed)│
 │ • /documents Route              │
 │ • Multi-file Drag & Drop Upload │
-│ • Ingestion Status Polling/SSE  │
+│ • Real-time WebSocket Ingestion │
+│ • Cascading Document Deletion   │
 └────────────────┬────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────┐
-│ Phase 4: Administration &       │
-│          Prompts                │
-│ • /admin Protected Route        │
-│ • User Role Management          │
-│ • System/RAG Prompt Editor      │
+│ Phase 4: Admin & Super Admin    │
+│          Consoles (Completed)   │
+│ • /admin Prompt Management      │
+│ • /admin/super User Management  │
+│ • Runtime Project Configuration │
+└────────────────┬────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│ Phase 5: Account, History &     │
+│          Profile (Completed)    │
+│ • /profile Display Name Editing │
+│ • /settings Bcrypt Passwords    │
+│ • 3-Dot Conversation Deletion   │
+│ • Accessible Logout Dialog      │
 └─────────────────────────────────┘
 ```
 
-### Phase 2: Shell Decomposition & Chat Integration
-- **Step 2.1:** Extract common icons into `components/ui/icons.tsx`.
-- **Step 2.2:** Decompose `frontend/src/app/page.tsx` into:
-  - `components/layout/sidebar.tsx`
-  - `components/layout/topbar.tsx`
-  - `components/layout/user-profile-menu.tsx`
-  - `components/chat/welcome-screen.tsx`
-  - `components/chat/composer.tsx`
-- **Step 2.3:** Implement `hooks/useChat.ts` to manage:
-  - Active conversation ID.
-  - Sending queries to `/api/chat`.
-  - Storing message streams (`Message[]`).
-  - Rendering source citations with `components/chat/citation-badge.tsx` and drawer.
+### Implemented Frontend Capabilities (Milestones 1–5 Complete)
+- **Phase 1: Foundation:** Next.js App Router, pure external store `AuthContext`, dark theme styling tokens, responsive navigation shell, `/login` and `/register`.
+- **Phase 2: Conversational Chat & Citations:** Decomposed chat components (`welcome-screen.tsx`, `message-list.tsx`, `message-item.tsx`, `composer.tsx`), clickable citation badges, and focused `citation-drawer.tsx` showing document name, page number, relevance similarity score, and exact excerpt.
+- **Phase 3: Real-Time Ingestion & Documents:** `/documents` route, drag-and-drop file upload, live `/ws` WebSocket events (`document.parsing`, `document.chunking`, `document.embedding`, `document.ready`, `document.failed`), status badges, and document deletion with backend cascade.
+- **Phase 4: Admin & Super Admin Consoles:**
+  - `/admin`: Role-gated prompt manager for `ADMIN` and `SUPER_ADMIN` (list, create, edit, activate/deactivate, delete).
+  - `/admin/super`: Dedicated console for `SUPER_ADMIN` with user provisioning, role promotion/demotion, user deletion, and dynamic runtime configuration of LLM providers, models, temperature, topK, similarity thresholds, and concurrency.
+- **Phase 5: User Profile, Settings, & Chat History:**
+  - `/profile`: Authenticated user profile view with display name editing and client/server validation.
+  - `/settings`: Account overview with secure current password verification and bcrypt-hashed password updating.
+  - `sidebar.tsx`: Conversation history with three-dot options menu, confirmation modal, immediate sidebar update without page reload, and active chat reset.
+  - `user-profile-menu.tsx`: Accessible logout confirmation modal with duplicate-request protection.
+  - `app-layout.tsx`: Reusable DRY layout shell for secondary application pages.
 
-### Phase 3: Document Management (`/documents`)
-- **Step 3.1:** Create route `frontend/src/app/documents/page.tsx` using the shared `Sidebar` and `Topbar`.
-- **Step 3.2:** Build `components/documents/document-table.tsx` displaying filename, fileType, chunkCount, status, and delete action (`DELETE /api/documents/:id`).
-- **Step 3.3:** Build `components/documents/upload-dropzone.tsx` accepting PDFs/DOCX/TXT and uploading via `uploadDocuments(files, token)` (`multipart/form-data`).
-- **Step 3.4:** Display real-time ingestion status using event types (`document.parsing`, `document.chunking`, `document.embedding`, `document.ready`).
-
-### Phase 4: Administration & Prompt Engineering (`/admin`)
-- **Step 4.1:** Create route `frontend/src/app/admin/page.tsx` with role guard (`ADMIN` / `SUPER_ADMIN`).
-- **Step 4.2:** Implement user management tab: view users (`GET /api/admin/users`), promote/demote roles (`PATCH /api/admin/users/:id/role`), create admin users.
-- **Step 4.3:** Implement prompt management tab: view prompts (`GET /api/prompts`), edit RAG prompt template (`PATCH /api/prompts/:id`), activate prompts.
+### Remaining Scope & Future Opportunities (Phase 2+)
+The following frontend enhancements are tracked for subsequent phases:
+1. **Token-by-Token Live Streaming:** Transition chat responses from discrete JSON requests to incremental character-by-character token rendering via WebSockets or Server-Sent Events (SSE).
+2. **Interactive PDF Source Preview:** Embed an in-browser PDF viewer inside `citation-drawer.tsx` with automated jumping to the cited page number.
+3. **Conversation & Document Search:** Add keyword search and date/category filters to the sidebar chat history and document tables.
+4. **Code Syntax Highlighting:** Integrate a dedicated syntax highlighting library (e.g. Prism or Shiki) for syntax-colored markdown code blocks.
+5. **Pagination & Infinite Scroll:** Paginate large document and user lists in the admin consoles.
 
 ---
 
