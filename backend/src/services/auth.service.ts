@@ -63,3 +63,61 @@ export const loginUser = async (email: string, password: string) => {
     token: createToken(user.id, user.role),
   };
 };
+
+export const getUserProfile = async (userId: string) => {
+  const [user] = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      role: roles.name,
+      createdAt: users.createdAt,
+      updatedAt: users.updatedAt,
+    })
+    .from(users)
+    .innerJoin(roles, eq(users.roleId, roles.id))
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  return user ?? null;
+};
+
+export const updateUserProfile = async (userId: string, name: string) => {
+  const trimmed = name.trim();
+  const [updated] = await db
+    .update(users)
+    .set({ name: trimmed, updatedAt: new Date() })
+    .where(eq(users.id, userId))
+    .returning({ id: users.id });
+
+  if (!updated) return null;
+  return getUserProfile(userId);
+};
+
+export const changeUserPassword = async (
+  userId: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<{ success: boolean; error?: "notFound" | "invalidCurrentPassword" | "samePassword" }> => {
+  const [user] = await db
+    .select({ id: users.id, passwordHash: users.passwordHash })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  if (!user) return { success: false, error: "notFound" };
+
+  const matches = await bcrypt.compare(currentPassword, user.passwordHash);
+  if (!matches) return { success: false, error: "invalidCurrentPassword" };
+
+  const isSame = await bcrypt.compare(newPassword, user.passwordHash);
+  if (isSame) return { success: false, error: "samePassword" };
+
+  const newHash = await bcrypt.hash(newPassword, 10);
+  await db
+    .update(users)
+    .set({ passwordHash: newHash, updatedAt: new Date() })
+    .where(eq(users.id, userId));
+
+  return { success: true };
+};

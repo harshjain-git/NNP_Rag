@@ -1,15 +1,22 @@
 "use client";
 
 import React, { useEffect, useRef } from "react";
-import type { Message } from "@/types";
+import type { Message, Citation } from "@/types";
 import { MessageItem } from "./message-item";
 
 interface MessageListProps {
   messages: Message[];
   isGenerating?: boolean;
+  onSelectCitation?: (citation: Citation) => void;
+  activeCitationId?: string | null;
 }
 
-export function MessageList({ messages, isGenerating = false }: MessageListProps) {
+export function MessageList({
+  messages,
+  isGenerating = false,
+  onSelectCitation,
+  activeCitationId,
+}: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -19,7 +26,12 @@ export function MessageList({ messages, isGenerating = false }: MessageListProps
   return (
     <div className="w-full max-w-3xl flex-1 flex flex-col space-y-6 py-4">
       {messages.map((message) => (
-        <MessageItem key={message.id} message={message} />
+        <MessageItem
+          key={message.id}
+          message={message}
+          onSelectCitation={onSelectCitation}
+          activeCitationId={activeCitationId}
+        />
       ))}
 
       {/* Generating / Thinking Indicator */}

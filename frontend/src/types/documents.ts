@@ -1,4 +1,5 @@
 export type DocumentStatus = "uploaded" | "processing" | "ready" | "failed";
+export type IngestionStage = "processing" | "parsing" | "chunking" | "embedding";
 
 export interface DocumentItem {
   id: string;
@@ -7,6 +8,10 @@ export interface DocumentItem {
   filePath: string;
   contentHash: string;
   status: DocumentStatus;
+  stage?: IngestionStage;
+  totalPages?: number;
+  totalChunks?: number;
+  errorMessage?: string;
   uploadedBy?: string | null;
   createdAt: string;
   updatedAt: string;

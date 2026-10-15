@@ -38,3 +38,21 @@ export interface LoginPayload {
   email: string;
   password: string;
 }
+
+export interface UpdateProfilePayload {
+  name: string;
+}
+
+export interface ChangePasswordPayload {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export interface ProfileResponse {
+  user: User;
+  message?: string;
+}
+
+export interface MessageResponse {
+  message: string;
+}

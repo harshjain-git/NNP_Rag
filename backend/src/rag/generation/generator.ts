@@ -5,7 +5,9 @@ import {
   DEFAULT_INSUFFICIENT_EVIDENCE_MESSAGE,
   DEFAULT_MIN_SUFFICIENCY_SCORE,
 } from "../../config/rag.js";
+import { configService } from "../../services/config.service.js";
 import { buildRAGPrompt, DEFAULT_RAG_SYSTEM_PROMPT } from "./prompt.js";
+
 import { checkEvidenceSufficiency } from "./sufficiency.js";
 import { promptsService } from "../../services/prompts.service.js";
 import type {
@@ -84,7 +86,8 @@ export const generateAnswerStream = async (
   const retrievedChunks = await retrieveFn(trimmedQuery, retrieveOpts);
 
   // 2. Pre-generation evidence sufficiency check
-  const minScore = options?.minSufficiencyScore ?? DEFAULT_MIN_SUFFICIENCY_SCORE;
+  const runtimeConfig = configService.getProjectConfig();
+  const minScore = options?.minSufficiencyScore ?? runtimeConfig.retrieval.minSufficiencyScore ?? DEFAULT_MIN_SUFFICIENCY_SCORE;
   const sufficiency = checkEvidenceSufficiency(retrievedChunks, minScore);
 
   if (!sufficiency.isSufficient) {
@@ -143,19 +146,23 @@ export const generateAnswerStream = async (
     }
   };
 
+  const finalTemperature = options?.temperature ?? runtimeConfig.generation.temperature ?? 0.1;
+  const finalMaxTokens = options?.maxTokens ?? runtimeConfig.generation.maxTokens ?? 1024;
+
   if (typeof provider.generateStream === "function") {
     await provider.generateStream(userPrompt, handleToken, {
       systemPrompt: finalSystemPrompt,
-      temperature: options?.temperature ?? 0.1,
-      maxTokens: options?.maxTokens ?? 1024,
+      temperature: finalTemperature,
+      maxTokens: finalMaxTokens,
       signal: options?.signal,
     });
   } else {
     rawResponse = await provider.generate(userPrompt, {
       systemPrompt: finalSystemPrompt,
-      temperature: options?.temperature ?? 0.1,
-      maxTokens: options?.maxTokens ?? 1024,
+      temperature: finalTemperature,
+      maxTokens: finalMaxTokens,
     });
+
     if (!rawResponse.startsWith(SENTINEL)) {
       await options.onToken(rawResponse);
     }

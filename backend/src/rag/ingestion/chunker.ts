@@ -24,6 +24,7 @@ import {
   DEFAULT_FALLBACK_OVERLAP,
   DEFAULT_MIN_CHUNK_CHARS,
 } from "../../config/rag.js";
+import { configService } from "../../services/config.service.js";
 
 /**
  * Document chunking layer using LlamaIndex.TS.
@@ -51,10 +52,13 @@ export const chunkDocument = (
     return [];
   }
 
-  const structuralMax = options?.structuralMax ?? DEFAULT_STRUCTURAL_MAX;
-  const fallbackChunkSize = options?.fallbackChunkSize ?? DEFAULT_FALLBACK_CHUNK_SIZE;
-  const fallbackOverlap = options?.fallbackOverlap ?? DEFAULT_FALLBACK_OVERLAP;
-  const minChunkChars = options?.minChunkChars ?? DEFAULT_MIN_CHUNK_CHARS;
+  const runtimeChunking = configService.getProjectConfig().chunking;
+  const structuralTarget = options?.structuralTarget ?? runtimeChunking?.structuralTarget ?? DEFAULT_STRUCTURAL_TARGET;
+  const structuralMax = options?.structuralMax ?? runtimeChunking?.structuralMax ?? DEFAULT_STRUCTURAL_MAX;
+  const fallbackChunkSize = options?.fallbackChunkSize ?? runtimeChunking?.fallbackChunkSize ?? structuralTarget ?? DEFAULT_FALLBACK_CHUNK_SIZE;
+  const fallbackOverlap = options?.fallbackOverlap ?? runtimeChunking?.fallbackOverlap ?? DEFAULT_FALLBACK_OVERLAP;
+  const minChunkChars = options?.minChunkChars ?? runtimeChunking?.minChunkChars ?? DEFAULT_MIN_CHUNK_CHARS;
+
 
   const markdownParser = new MarkdownNodeParser();
   const fallbackSplitter = new SentenceSplitter({

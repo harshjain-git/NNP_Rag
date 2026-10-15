@@ -12,11 +12,13 @@ import {
   DEFAULT_MIN_SIMILARITY,
   DEFAULT_RETRIEVAL_TOP_K,
 } from "../../config/rag.js";
+import { configService } from "../../services/config.service.js";
 import type {
   RetrievedChunk,
   RetrieveOptions,
   PGVectorRetrieverOptions,
 } from "./types.js";
+
 
 /**
  * LlamaIndex BaseRetriever implementation backed by PostgreSQL + pgvector cosine similarity.
@@ -55,7 +57,8 @@ export const retrieveChunks = async (
   options?: RetrieveOptions
 ): Promise<RetrievedChunk[]> => {
   const trimmed = query.trim();
-  const topK = options?.topK ?? DEFAULT_RETRIEVAL_TOP_K;
+  const runtimeConfig = configService.getProjectConfig();
+  const topK = options?.topK ?? runtimeConfig.retrieval.topK ?? DEFAULT_RETRIEVAL_TOP_K;
   if (!trimmed || topK <= 0) return [];
 
   const provider = options?.embeddingProvider ?? getEmbeddingProvider();
@@ -88,7 +91,8 @@ export const retrieveChunks = async (
     .orderBy(asc(cosineDistance(documentChunks.embedding, queryEmbedding)))
     .limit(fetchLimit);
 
-  const minSim = options?.minSimilarity ?? DEFAULT_MIN_SIMILARITY;
+  const minSim = options?.minSimilarity ?? runtimeConfig.retrieval.minSimilarity ?? DEFAULT_MIN_SIMILARITY;
+
   const uniqueChunks: RetrievedChunk[] = [];
   const seenContents = new Set<string>();
 

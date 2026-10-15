@@ -1,0 +1,38 @@
+{
+  "models": {
+    "llmProvider": "groq",
+    "llmModel": "openai/gpt-oss-120b",
+    "embeddingProvider": "local",
+    "embeddingModel": "Xenova/jina-embeddings-v2-small-en",
+    "supportedLLMProviders": [
+      "groq",
+      "gemini",
+      "ollama"
+    ],
+    "supportedEmbeddingProviders": [
+      "local"
+    ],
+    "embeddingDimension": 512
+  },
+  "retrieval": {
+    "topK": 8,
+    "minSimilarity": 0.55,
+    "minSufficiencyScore": 0.7
+  },
+  "chunking": {
+    "structuralTarget": 1000,
+    "structuralMax": 1200,
+    "fallbackChunkSize": 1000,
+    "fallbackOverlap": 120,
+    "minChunkChars": 300
+  },
+  "generation": {
+    "temperature": 0.2,
+    "maxTokens": 1500
+  },
+  "system": {
+    "ingestionConcurrency": 4,
+    "nodeEnv": "development",
+    "databaseStatus": "connected"
+  }
+}

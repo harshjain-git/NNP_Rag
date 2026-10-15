@@ -24,6 +24,8 @@ export function UserProfileMenu({
 }: UserProfileMenuProps) {
   const router = useRouter();
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
 
   // Close profile menu when clicking outside
@@ -39,6 +41,29 @@ export function UserProfileMenu({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // Keyboard accessibility for logout confirmation dialog
+  useEffect(() => {
+    if (!isLogoutConfirmOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsLogoutConfirmOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isLogoutConfirmOpen]);
+
+  const handleConfirmLogout = () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      onLogout();
+    } finally {
+      setIsLogoutConfirmOpen(false);
+      setIsLoggingOut(false);
+    }
+  };
 
   return (
     <div
@@ -90,7 +115,7 @@ export function UserProfileMenu({
                 type="button"
                 onClick={() => {
                   setIsProfileMenuOpen(false);
-                  onLogout();
+                  setIsLogoutConfirmOpen(true);
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-red-400 hover:text-red-300 hover:bg-red-950/40 transition-colors text-left"
               >
@@ -119,6 +144,43 @@ export function UserProfileMenu({
             </div>
             <MoreVerticalIcon className="w-4 h-4 text-zinc-400 shrink-0" />
           </button>
+
+          {/* Logout Confirmation Dialog */}
+          {isLogoutConfirmOpen && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="logout-title"
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+            >
+              <div className="w-full max-w-sm bg-[#262626] border border-zinc-700/80 rounded-2xl p-5 shadow-2xl space-y-4">
+                <h3 id="logout-title" className="text-sm font-semibold text-white">
+                  Are you sure you want to log out?
+                </h3>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  You will need to sign in again to access your account, documents, and previous conversations.
+                </p>
+                <div className="flex justify-end gap-2 pt-2 border-t border-zinc-800">
+                  <button
+                    type="button"
+                    disabled={isLoggingOut}
+                    onClick={() => setIsLogoutConfirmOpen(false)}
+                    className="px-3.5 py-1.5 rounded-full text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isLoggingOut}
+                    onClick={handleConfirmLogout}
+                    className="px-4 py-1.5 rounded-full text-xs font-medium text-white bg-red-600 hover:bg-red-500 disabled:opacity-50 transition-colors"
+                  >
+                    {isLoggingOut ? "Logging out..." : "Log out"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       ) : (
         <div className="flex items-center gap-2">

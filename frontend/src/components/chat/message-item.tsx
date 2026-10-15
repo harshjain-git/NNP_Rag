@@ -1,20 +1,22 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import type { Message, Citation } from "@/types";
 import { DocumentIcon } from "@/components/ui/icons";
+import { CitationBadge } from "./citation-badge";
 
 interface MessageItemProps {
   message: Message;
+  onSelectCitation?: (citation: Citation) => void;
+  activeCitationId?: string | null;
 }
 
-export function MessageItem({ message }: MessageItemProps) {
+export function MessageItem({
+  message,
+  onSelectCitation,
+  activeCitationId,
+}: MessageItemProps) {
   const isUser = message.role === "user";
-  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
-
-  const toggleCitation = (idx: number) => {
-    setExpandedIndex((prev) => (prev === idx ? null : idx));
-  };
 
   if (isUser) {
     return (
@@ -27,62 +29,46 @@ export function MessageItem({ message }: MessageItemProps) {
   }
 
   const citations: Citation[] = message.citations || [];
+  const isInsufficientEvidence =
+    message.content.toLowerCase().includes("could not find sufficient evidence") ||
+    message.content.startsWith("INSUFFICIENT_EVIDENCE:");
 
   return (
     <div className="flex flex-col w-full text-zinc-100 space-y-3">
-      {/* Assistant Message Content */}
+      {/* Insufficient Evidence Warning Banner */}
+      {isInsufficientEvidence && (
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-amber-950/40 text-amber-300 border border-amber-800/60 w-fit">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+          <span>Insufficient Evidence • Grounding Safeguard Triggered</span>
+        </div>
+      )}
+
+      {/* Assistant Answer Body */}
       <div className="text-sm sm:text-base text-zinc-200 leading-relaxed whitespace-pre-wrap break-words px-1">
         {message.content}
       </div>
 
-      {/* Citations Section */}
+      {/* Verified Sources / Citations Section */}
       {citations.length > 0 && (
-        <div className="mt-3 pt-3 border-t border-zinc-800/80 space-y-2">
-          <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-zinc-400">
-            <DocumentIcon className="w-3.5 h-3.5 text-zinc-400" />
+        <div className="mt-3 pt-3 border-t border-zinc-800/80 space-y-2.5">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+            <DocumentIcon className="w-3.5 h-3.5 text-blue-400" />
             <span>Sources ({citations.length})</span>
+            <span className="text-[10px] text-zinc-500 font-normal lowercase">
+              • click to inspect excerpt
+            </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-            {citations.map((citation, idx) => {
-              const isExpanded = expandedIndex === idx;
-              return (
-                <div
-                  key={`${citation.chunkId}-${idx}`}
-                  className="rounded-2xl bg-[#262626]/90 border border-zinc-800 hover:border-zinc-700/80 p-3 transition-colors text-xs"
-                >
-                  <button
-                    type="button"
-                    onClick={() => toggleCitation(idx)}
-                    className="w-full flex items-center justify-between text-left gap-2 focus:outline-hidden"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <DocumentIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                      <span className="font-medium text-zinc-200 truncate">
-                        {citation.filename}
-                      </span>
-                    </div>
-                    {citation.pageNumber !== null && (
-                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 shrink-0">
-                        p. {citation.pageNumber}
-                      </span>
-                    )}
-                  </button>
-
-                  {/* Expandable Snippet Preview */}
-                  {citation.snippet && (
-                    <div
-                      className={`mt-2 text-zinc-400 text-[11px] leading-relaxed border-t border-zinc-800/70 pt-2 ${
-                        isExpanded ? "whitespace-pre-wrap" : "line-clamp-2 cursor-pointer"
-                      }`}
-                      onClick={() => toggleCitation(idx)}
-                    >
-                      {citation.snippet}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+          <div className="flex flex-wrap gap-2 pt-0.5">
+            {citations.map((citation, idx) => (
+              <CitationBadge
+                key={`${citation.chunkId}-${idx}`}
+                citation={citation}
+                index={idx + 1}
+                onClick={() => onSelectCitation?.(citation)}
+                isActive={activeCitationId === citation.chunkId}
+              />
+            ))}
           </div>
         </div>
       )}

@@ -108,7 +108,17 @@ export class IngestionQueue {
   }
 }
 
-export const ingestionQueue = new IngestionQueue();
+import { configService, onConfigChange } from "../../services/config.service.js";
+
+export const ingestionQueue = new IngestionQueue(
+  configService.getProjectConfig().system.ingestionConcurrency
+);
+
+onConfigChange((cfg) => {
+  if (cfg.system?.ingestionConcurrency) {
+    ingestionQueue.setConcurrency(cfg.system.ingestionConcurrency);
+  }
+});
 
 export const enqueueDocument = (documentId: string): void => {
   ingestionQueue.enqueue(documentId);

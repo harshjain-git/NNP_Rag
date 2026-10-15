@@ -10,6 +10,8 @@ import { Topbar } from "@/components/layout/topbar";
 import { WelcomeScreen } from "@/components/chat/welcome-screen";
 import { MessageList } from "@/components/chat/message-list";
 import { Composer } from "@/components/chat/composer";
+import { CitationDrawer } from "@/components/chat/citation-drawer";
+import type { Citation } from "@/types";
 
 export default function Home() {
   const router = useRouter();
@@ -18,10 +20,12 @@ export default function Home() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
+  const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
 
   const {
     conversations,
     refreshConversations,
+    deleteConversationById,
   } = useConversations(token);
 
   const {
@@ -48,12 +52,22 @@ export default function Home() {
   const handleNewChat = () => {
     startNewChat();
     setInputValue("");
+    setSelectedCitation(null);
     setIsMobileSidebarOpen(false);
   };
 
   const handleSelectConversation = (id: string) => {
     loadConversation(id);
+    setSelectedCitation(null);
     setIsMobileSidebarOpen(false);
+  };
+
+  const handleDeleteConversation = async (id: string): Promise<boolean> => {
+    const success = await deleteConversationById(id);
+    if (success && id === activeConversationId) {
+      handleNewChat();
+    }
+    return success;
   };
 
   const handleSubmit = async () => {
@@ -82,6 +96,7 @@ export default function Home() {
         conversations={displayedConversations}
         activeConversationId={activeConversationId}
         onSelectConversation={handleSelectConversation}
+        onDeleteConversation={handleDeleteConversation}
         user={user}
         isAuthenticated={isAuthenticated}
         onLogout={handleLogout}
@@ -100,7 +115,12 @@ export default function Home() {
           {messages.length === 0 ? (
             <WelcomeScreen onSelectSuggestion={handleSelectSuggestion} />
           ) : (
-            <MessageList messages={messages} isGenerating={isGenerating} />
+            <MessageList
+              messages={messages}
+              isGenerating={isGenerating}
+              onSelectCitation={setSelectedCitation}
+              activeCitationId={selectedCitation?.chunkId}
+            />
           )}
 
           {error && (
@@ -130,6 +150,13 @@ export default function Home() {
           />
         </main>
       </div>
+
+      {/* Source Citation Inspector Drawer */}
+      <CitationDrawer
+        citation={selectedCitation}
+        isOpen={Boolean(selectedCitation)}
+        onClose={() => setSelectedCitation(null)}
+      />
     </div>
   );
 }

@@ -4,7 +4,10 @@ import type {
   AdminUserResponse,
   CreateAdminUserPayload,
   UpdateUserRolePayload,
+  UpdateProjectConfigPayload,
+  ProjectConfigResponse,
 } from "@/types";
+
 
 export async function getAdminUsers(
   token?: string | null
@@ -53,3 +56,24 @@ export async function deleteAdminUser(
     }
   );
 }
+
+export async function getProjectConfig(
+  token?: string | null
+): Promise<ProjectConfigResponse> {
+  return request<ProjectConfigResponse>("/api/admin/config", {
+    method: "GET",
+    token,
+  });
+}
+
+export async function updateProjectConfig(
+  payload: UpdateProjectConfigPayload,
+  token?: string | null
+): Promise<ProjectConfigResponse> {
+  return request<ProjectConfigResponse>("/api/admin/config", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+    token,
+  });
+}
+

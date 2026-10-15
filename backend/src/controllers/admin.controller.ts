@@ -126,3 +126,30 @@ export const deleteUserController = async (req: Request, res: Response): Promise
   }
 };
 
+export const getProjectConfigController = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const { getProjectConfig } = await import("../services/config.service.js");
+    const config = getProjectConfig();
+    res.status(200).json({ config });
+  } catch (error) {
+    console.error("Get project config error:", error);
+    res.status(500).json({ error: "Failed to fetch project configuration" });
+  }
+};
+
+export const updateProjectConfigController = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { updateProjectConfig } = await import("../services/config.service.js");
+    const result = updateProjectConfig(req.body ?? {});
+    if (result.error) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    res.status(200).json({ message: "Project configuration updated successfully", config: result.config });
+  } catch (error) {
+    console.error("Update project config error:", error);
+    res.status(500).json({ error: "Failed to update project configuration" });
+  }
+};
+
+
