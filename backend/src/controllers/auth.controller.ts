@@ -9,6 +9,21 @@ import {
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const getAuthCookieOptions = () => ({
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: (process.env.NODE_ENV === "production" ? "none" : "lax") as "none" | "lax",
+  path: "/",
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+});
+
+const getClearCookieOptions = () => ({
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: (process.env.NODE_ENV === "production" ? "none" : "lax") as "none" | "lax",
+  path: "/",
+});
+
 export const registerController = async (req: Request, res: Response): Promise<void> => {
   const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
   const email = typeof req.body?.email === "string" ? req.body.email.trim() : "";
@@ -21,6 +36,7 @@ export const registerController = async (req: Request, res: Response): Promise<v
   try {
     const result = await registerUser(name, email.toLowerCase(), password);
     if ("error" in result) return void res.status(409).json({ error: "Email is already registered" });
+    res.cookie("nnt_rag_token", result.token, getAuthCookieOptions());
     res.status(201).json(result);
   } catch (error) {
     console.error("Register error:", error);
@@ -37,11 +53,17 @@ export const loginController = async (req: Request, res: Response): Promise<void
   try {
     const result = await loginUser(email.toLowerCase(), password);
     if (!result) return void res.status(401).json({ error: "Invalid email or password" });
+    res.cookie("nnt_rag_token", result.token, getAuthCookieOptions());
     res.status(200).json(result);
   } catch (error) {
     console.error("Login error:", error);
     res.status(500).json({ error: "Login failed" });
   }
+};
+
+export const logoutController = async (_req: Request, res: Response): Promise<void> => {
+  res.clearCookie("nnt_rag_token", getClearCookieOptions());
+  res.status(200).json({ message: "Logged out successfully" });
 };
 
 export const getProfileController = async (req: Request, res: Response): Promise<void> => {

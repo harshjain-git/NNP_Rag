@@ -9,6 +9,7 @@ import {
   MAX_MESSAGES_PER_CONVERSATION,
   CONVERSATION_TITLE_MAX_LENGTH,
 } from "../config/rag.js";
+import { ROLE_NAMES } from "../database/schema.js";
 
 // Standard UUID format validator (8-4-4-4-12 hexadecimal string)
 const UUID_REGEX =
@@ -142,7 +143,11 @@ export const chatController = async (
       warning = persisted.warning;
     }
 
-    res.status(200).json({
+    const isAuthorizedForDebug =
+      req.user?.role === ROLE_NAMES.ADMIN ||
+      req.user?.role === ROLE_NAMES.SUPER_ADMIN;
+
+    const responsePayload: Record<string, unknown> = {
       conversationId: finalConversationId,
       answer: result.answer,
       evidenceSufficient: result.evidenceSufficient,
@@ -153,7 +158,13 @@ export const chatController = async (
       remainingMessages,
       warning,
       isNewConversation: finalIsNewConversation,
-    });
+    };
+
+    if (isAuthorizedForDebug) {
+      responsePayload.retrievalDebug = result.retrievalDebug;
+    }
+
+    res.status(200).json(responsePayload);
   } catch (error) {
     if (isNewConversation && activeConversationId && userId) {
       try {

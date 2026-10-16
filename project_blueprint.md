@@ -154,7 +154,7 @@ $$\text{HTTP Request} \longrightarrow \text{Route} \longrightarrow \text{Middlew
 | | `/api/auth/me` | `GET` | Authenticated | None | `{ user: SafeUser }` | **Implemented** (JWT protected) |
 | | `/api/auth/profile` | `PATCH` | Authenticated | `{ name: string }` | `{ message: string, user: SafeUser }` | **Implemented** (JWT protected) |
 | | `/api/auth/password` | `PATCH` | Authenticated | `{ currentPassword, newPassword }` | `{ message: string }` | **Implemented** (JWT protected) |
-| **Chat** | `/api/chat` | `POST` | `USER` / `ADMIN` / `SUPER_ADMIN` | `{ query, documentId?, conversationId?, systemPrompt? }` | `{ conversationId, answer, evidenceSufficient, refusalReason?, citations, modelName, providerName, remainingMessages, warning, isNewConversation }` | **Implemented** (JWT + RBAC protected) |
+| **Chat** | `/api/chat` | `POST` | `USER` / `ADMIN` / `SUPER_ADMIN` | `{ query, documentId?, conversationId?, systemPrompt? }` | `{ conversationId, answer, evidenceSufficient, refusalReason?, citations, modelName, providerName, remainingMessages, warning, isNewConversation, retrievalDebug? }` | **Implemented** (JWT + RBAC protected; `retrievalDebug` exposed for `ADMIN` & `SUPER_ADMIN`) |
 | | `/ws` | `WS` | `USER` / `ADMIN` / `SUPER_ADMIN` | Client events: `auth`, `chat.send`, `chat.cancel` | Server events: `chat.start`, `chat.token`, `chat.complete`, `chat.error`, `document.*` | **Implemented** (JWT auth, client isolation) |
 | | `/api/conversations` | `GET` | `USER` / `ADMIN` / `SUPER_ADMIN` | None | `{ conversations: Conversation[] }` | **Implemented** (JWT + RBAC protected) |
 | | `/api/conversations/:id` | `GET` | `USER` / `ADMIN` / `SUPER_ADMIN` | None | `{ conversation: Conversation & { messages: Message[] }, messages: Message[] }` | **Implemented** (JWT + RBAC protected) |
@@ -508,6 +508,7 @@ export interface GenerateAnswerResult {
   retrievedChunks: RetrievedChunk[];
   modelName: string;
   providerName: string;
+  retrievalDebug: RetrievalDebugInfo;
 }
 ```
 
@@ -663,7 +664,7 @@ The security architecture implements the following authentication, authorization
 - [x] **Document Management Interface (`/documents`):** Drag-and-drop multi-file upload dropzone, real-time WebSocket progress bars tracking parsing/chunking/embedding stages, document table with status badges, and document deletion.
 - [x] **Interactive Conversational UI (`/`):** Full multi-turn chat experience with prompt suggestions, assistant/user bubbles, markdown and code blocks, copy action, and grounded responses.
 - [x] **Source Inspector & Citations:** Interactive citation badges on assistant messages opening a focused side drawer displaying source document name, page number, similarity score, and exact retrieved chunk text excerpt.
-- [x] **Prompt Administration Console (`/admin`):** Admin & Super Admin interface for creating, reviewing, editing, toggling active status, and deleting system and RAG prompt templates.
+- [x] **Prompt Administration Console (`/admin`):** Admin & Super Admin interface for creating, reviewing, editing, toggling active status, and deleting system prompt templates.
 - [x] **Super Admin Management & Configuration (`/admin/super`):** Dedicated console featuring administrative user provisioning, role promotion/demotion, user deletion, and dynamic project runtime settings (LLM provider, model, temperature, topK, similarity threshold, chunk size, overlap, concurrency).
 - [x] **Chat History Management:** Collapsible sidebar with conversation listing, three-dot options menu, confirmation modal for conversation deletion, cascading database message cleanup, and active chat reset.
 - [x] **Profile & Account Settings (`/profile`, `/settings`):** User profile view with display name editing, and account settings with secure current password verification and bcrypt-hashed password updating.

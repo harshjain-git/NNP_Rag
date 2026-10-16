@@ -29,6 +29,7 @@ The frontend foundation is already functional, type-checked, and linted with zer
 frontend/
 ├── package.json               # Next.js 16.3.8, React 19.2.8, Tailwind CSS v4, TypeScript 5
 ├── src/
+│   ├── proxy.ts               # Next.js 16 Proxy (Middleware) route protection & cookie guard
 │   ├── app/                   # Next.js App Router
 │   │   ├── layout.tsx         # Root layout with Geist fonts & application-level AuthProvider
 │   │   ├── globals.css        # Tailwind v4 import & dark theme base

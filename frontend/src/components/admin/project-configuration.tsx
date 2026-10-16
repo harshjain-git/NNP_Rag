@@ -66,6 +66,23 @@ export function ProjectConfiguration({
   );
 }
 
+const FALLBACK_AVAILABLE_MODELS: Record<LLMProviderName, string[]> = {
+  ollama: ["hf.co/unsloth/Qwen3.5-0.8B-GGUF:Q4_K_M"],
+  groq: [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.8-27b",
+    "allam-2-7b",
+  ],
+  gemini: [
+    "gemini-3.8-flash",
+    "gemini-3.5-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+  ],
+};
+
 function ConfigForm({
   config,
   isSaving,
@@ -75,8 +92,15 @@ function ConfigForm({
   isSaving: boolean;
   onSave: (payload: UpdateProjectConfigPayload) => Promise<boolean>;
 }) {
-  const [llmProvider, setLlmProvider] = useState<LLMProviderName>(config.models.llmProvider);
-  const [llmModel, setLlmModel] = useState(config.models.llmModel);
+  const availableModels = config.models.availableModels || FALLBACK_AVAILABLE_MODELS;
+  const initialProvider = config.models.llmProvider;
+  const initialModels = availableModels[initialProvider] || FALLBACK_AVAILABLE_MODELS[initialProvider] || [];
+  const initialModel = initialModels.includes(config.models.llmModel)
+    ? config.models.llmModel
+    : (initialModels[0] || config.models.llmModel);
+
+  const [llmProvider, setLlmProvider] = useState<LLMProviderName>(initialProvider);
+  const [llmModel, setLlmModel] = useState(initialModel);
 
   const [topK, setTopK] = useState(config.retrieval.topK);
   const [minSimilarity, setMinSimilarity] = useState(config.retrieval.minSimilarity);
@@ -93,16 +117,11 @@ function ConfigForm({
   const [concurrency, setConcurrency] = useState(config.system.ingestionConcurrency);
   const [error, setError] = useState<string | null>(null);
 
-  const DEFAULT_MODELS: Record<LLMProviderName, string> = {
-    groq: "llama-3.3-70b-versatile",
-    gemini: "gemini-1.5-flash",
-    ollama: "llama3:8b",
-  };
-
   const handleProviderChange = (newProvider: LLMProviderName) => {
     setLlmProvider(newProvider);
-    if (!llmModel || Object.values(DEFAULT_MODELS).includes(llmModel)) {
-      setLlmModel(DEFAULT_MODELS[newProvider]);
+    const providerModels = availableModels[newProvider] || FALLBACK_AVAILABLE_MODELS[newProvider] || [];
+    if (!providerModels.includes(llmModel)) {
+      setLlmModel(providerModels[0] || "");
     }
   };
 
@@ -121,6 +140,8 @@ function ConfigForm({
       system: { ingestionConcurrency: concurrency },
     });
   };
+
+  const currentProviderModels = availableModels[llmProvider] || FALLBACK_AVAILABLE_MODELS[llmProvider] || [];
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -148,12 +169,20 @@ function ConfigForm({
           </div>
           <div>
             <label className="block text-xs font-medium text-zinc-300 mb-1">LLM Model</label>
-            <input
-              type="text"
+            <select
               value={llmModel}
               onChange={(e) => setLlmModel(e.target.value)}
               className="w-full px-3 py-1.5 rounded-xl bg-[#2f2f2f] border border-zinc-700 text-xs sm:text-sm text-white focus:outline-hidden"
-            />
+            >
+              {!currentProviderModels.includes(llmModel) && llmModel && (
+                <option value={llmModel}>{llmModel}</option>
+              )}
+              {currentProviderModels.map((model) => (
+                <option key={model} value={model}>
+                  {model}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-xs font-medium text-zinc-300 mb-1">Embedding Provider</label>

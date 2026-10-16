@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   registerController,
   loginController,
+  logoutController,
   getProfileController,
   updateProfileController,
   changePasswordController,
@@ -13,6 +14,7 @@ const router = Router();
 // Public authentication endpoints
 router.post("/register", registerController);
 router.post("/login", loginController);
+router.post("/logout", logoutController);
 
 // Authenticated user profile and account endpoints
 router.get("/me", authenticate, getProfileController);

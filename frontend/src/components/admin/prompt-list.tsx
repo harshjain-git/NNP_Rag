@@ -37,7 +37,7 @@ export function PromptList({
         <ShieldIcon className="w-8 h-8 text-zinc-500" />
         <p className="text-sm font-medium text-white">No prompt templates found</p>
         <p className="text-xs text-zinc-400 max-w-sm mb-2">
-          Create system or RAG prompt templates to configure grounding and synthesis.
+          Create system prompt templates to configure grounding, persona, and synthesis.
         </p>
         <button
           type="button"
@@ -64,8 +64,8 @@ export function PromptList({
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2.5 flex-wrap">
                 <span className="text-sm font-semibold text-white">{prompt.name}</span>
-                <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-md bg-zinc-800 text-zinc-300 border border-zinc-700">
-                  {prompt.type}
+                <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-zinc-800 text-zinc-300 border border-zinc-700">
+                  System Prompt
                 </span>
                 <button
                   type="button"

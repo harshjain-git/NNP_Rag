@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
@@ -8,6 +11,7 @@ import { ROLE_NAMES } from "../src/database/schema.js";
 import { JWT_SECRET } from "../src/config/env.js";
 import { ingestionQueue } from "../src/rag/ingestion/queue.js";
 import { getLLMProvider } from "../src/providers/llm/index.js";
+import { configService } from "../src/services/config.service.js";
 
 describe("Super Admin Project Configuration APIs (/api/admin/config)", () => {
   let server: http.Server;
@@ -30,7 +34,21 @@ describe("Super Admin Project Configuration APIs (/api/admin/config)", () => {
     JWT_SECRET
   );
 
+  const settingsFilePath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../runtime-settings.json"
+  );
+  let originalSettingsContent: string | null = null;
+  let originalConfig: ReturnType<typeof configService.getProjectConfig> | null = null;
+
   before(async () => {
+    try {
+      originalConfig = configService.getProjectConfig();
+      if (fs.existsSync(settingsFilePath)) {
+        originalSettingsContent = fs.readFileSync(settingsFilePath, "utf-8");
+      }
+    } catch {}
+
     await new Promise<void>((resolve) => {
       server = http.createServer(app).listen(0, "127.0.0.1", () => {
         const addr = server.address() as { port: number };
@@ -41,6 +59,15 @@ describe("Super Admin Project Configuration APIs (/api/admin/config)", () => {
   });
 
   after(async () => {
+    try {
+      if (originalSettingsContent !== null) {
+        fs.writeFileSync(settingsFilePath, originalSettingsContent, "utf-8");
+      }
+      if (originalConfig) {
+        configService.updateProjectConfig(originalConfig);
+      }
+    } catch {}
+
     await new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
     });
@@ -254,14 +281,14 @@ describe("Super Admin Project Configuration APIs (/api/admin/config)", () => {
         body: JSON.stringify({
           models: {
             llmProvider: "groq",
-            llmModel: "llama-3.3-70b-speculative",
+            llmModel: "llama-3.3-70b-versatile",
           },
         }),
       });
       assert.equal(modelRes.status, 200);
       const activeLLM = getLLMProvider();
       assert.equal(activeLLM.providerName, "groq");
-      assert.equal(activeLLM.modelName, "llama-3.3-70b-speculative");
+      assert.equal(activeLLM.modelName, "llama-3.3-70b-versatile");
     });
   });
 });

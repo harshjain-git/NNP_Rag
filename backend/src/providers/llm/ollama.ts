@@ -1,4 +1,4 @@
-import { OLLAMA_BASE_URL, OLLAMA_MODEL } from "../../config/env.js";
+import { OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_NUM_CTX } from "../../config/env.js";
 import { iterateLines } from "../../utils/stream.js";
 import type {
   GenerateOptions,
@@ -11,14 +11,20 @@ export class OllamaLLMProvider implements LLMProvider {
   readonly providerName = "ollama";
   readonly modelName: string;
   private readonly baseUrl: string;
+  private readonly numCtx: number;
 
-  constructor(modelName: string = OLLAMA_MODEL, baseUrl: string = OLLAMA_BASE_URL) {
+  constructor(
+    modelName: string = OLLAMA_MODEL,
+    baseUrl: string = OLLAMA_BASE_URL,
+    numCtx: number = OLLAMA_NUM_CTX
+  ) {
     this.modelName = modelName;
     this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.numCtx = numCtx;
   }
 
   async generate(prompt: string, options?: GenerateOptions): Promise<string> {
-    return this.generateStream(prompt, () => {}, options);
+    return this.generateStream(prompt, () => { }, options);
   }
 
   async generateStream(
@@ -41,6 +47,7 @@ export class OllamaLLMProvider implements LLMProvider {
         options: {
           temperature: options?.temperature ?? 0.1,
           num_predict: options?.maxTokens ?? 1024,
+          num_ctx: this.numCtx,
           repeat_penalty: 1.15,
         },
       }),
@@ -72,7 +79,7 @@ export class OllamaLLMProvider implements LLMProvider {
           await onToken(token);
         }
         if (parsed.done) break;
-      } catch {}
+      } catch { }
     }
 
     fullText = fullText.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();

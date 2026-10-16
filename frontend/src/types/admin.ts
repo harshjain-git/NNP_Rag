@@ -32,6 +32,7 @@ export interface ProjectConfig {
     supportedLLMProviders: LLMProviderName[];
     supportedEmbeddingProviders: EmbeddingProviderName[];
     embeddingDimension: number;
+    availableModels?: Record<LLMProviderName, string[]>;
   };
   retrieval: {
     topK: number;

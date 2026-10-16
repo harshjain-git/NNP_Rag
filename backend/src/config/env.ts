@@ -56,13 +56,14 @@ const GROQ_MODEL = process.env.GROQ_MODEL || "qwen/qwen3.8-27b";
 
 // 2. Google Gemini (Cloud API)
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
 // 3. Ollama (Local Machine Server)
 const OLLAMA_BASE_URL =
   process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
 const OLLAMA_MODEL =
   process.env.OLLAMA_MODEL || "hf.co/unsloth/Qwen3.5-0.8B-GGUF:Q4_K_M";
+const OLLAMA_NUM_CTX = Number(process.env.OLLAMA_NUM_CTX) || 8192;
 
 // ----------------------------------------------------------------------------
 // Part B: Active Provider & Model Selection
@@ -165,6 +166,7 @@ export {
   GEMINI_MODEL,
   OLLAMA_BASE_URL,
   OLLAMA_MODEL,
+  OLLAMA_NUM_CTX,
 
   // Ingestion Queue
   INGESTION_CONCURRENCY,

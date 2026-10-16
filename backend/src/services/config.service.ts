@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   LLM_PROVIDER,
   LLM_MODEL,
+  OLLAMA_MODEL,
   EMBEDDING_MODEL,
   INGESTION_CONCURRENCY,
   NODE_ENV,
@@ -22,6 +23,25 @@ import {
 export type LLMProviderName = "groq" | "gemini" | "ollama";
 export type EmbeddingProviderName = "local";
 
+export const AVAILABLE_MODELS: Record<LLMProviderName, string[]> = {
+  ollama: [
+    OLLAMA_MODEL || "hf.co/unsloth/Qwen3.5-0.8B-GGUF:Q4_K_M"
+  ],
+  groq: [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.8-27b",
+    "allam-2-7b"
+  ],
+  gemini: [
+    "gemini-3.8-flash",
+    "gemini-3.5-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite"
+  ]
+};
+
 export interface ProjectConfig {
   models: {
     llmProvider: LLMProviderName;
@@ -31,6 +51,7 @@ export interface ProjectConfig {
     supportedLLMProviders: LLMProviderName[];
     supportedEmbeddingProviders: EmbeddingProviderName[];
     embeddingDimension: number;
+    availableModels: Record<LLMProviderName, string[]>;
   };
   retrieval: {
     topK: number;
@@ -76,6 +97,7 @@ const currentConfig: ProjectConfig = {
     supportedLLMProviders: SUPPORTED_LLMS,
     supportedEmbeddingProviders: ["local"],
     embeddingDimension: 512,
+    availableModels: AVAILABLE_MODELS,
   },
   retrieval: {
     topK: DEFAULT_RETRIEVAL_TOP_K,
@@ -102,6 +124,11 @@ try {
     if (saved.chunking) Object.assign(currentConfig.chunking, saved.chunking);
     if (saved.generation) Object.assign(currentConfig.generation, saved.generation);
     if (saved.system?.ingestionConcurrency) currentConfig.system.ingestionConcurrency = saved.system.ingestionConcurrency;
+    // Ensure availableModels and supported lists are always up to date
+    currentConfig.models.availableModels = AVAILABLE_MODELS;
+    currentConfig.models.supportedLLMProviders = SUPPORTED_LLMS;
+    currentConfig.models.supportedEmbeddingProviders = ["local"];
+    currentConfig.models.embeddingDimension = 512;
   }
 } catch {
   // Graceful fallback to default config

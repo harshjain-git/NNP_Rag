@@ -3,8 +3,20 @@ import jwt from "jsonwebtoken";
 import { JWT_SECRET } from "../config/env.js";
 import type { JwtTokenPayload } from "../types/auth.types.js";
 
+const parseCookies = (cookieHeader?: string): Record<string, string> => {
+  if (!cookieHeader) return {};
+  const cookies: Record<string, string> = {};
+  for (const item of cookieHeader.split(";")) {
+    const [rawKey, ...rawVal] = item.trim().split("=");
+    if (rawKey) {
+      cookies[rawKey] = decodeURIComponent(rawVal.join("="));
+    }
+  }
+  return cookies;
+};
+
 /**
- * Authentication middleware that verifies JWT bearer tokens.
+ * Authentication middleware that verifies JWT bearer tokens or HttpOnly cookies.
  * Extracts `sub` (user id) and `role` claims and attaches `{ id, role }` to `req.user`.
  * Returns 401 Unauthorized for missing, malformed, invalid, or expired tokens.
  */
@@ -14,26 +26,34 @@ export const authenticate = (
   next: NextFunction
 ): void => {
   const authHeader = req.headers.authorization;
+  let token = "";
 
-  if (!authHeader) {
+  if (authHeader) {
+    const trimmedHeader = authHeader.trim();
+    if (trimmedHeader === "Bearer") {
+      res.status(401).json({ error: "Unauthorized: Token missing" });
+      return;
+    }
+
+    if (!authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Unauthorized: Malformed authorization header" });
+      return;
+    }
+
+    token = authHeader.slice(7).trim();
+    if (!token) {
+      res.status(401).json({ error: "Unauthorized: Token missing" });
+      return;
+    }
+  } else if (req.headers.cookie) {
+    const cookies = parseCookies(req.headers.cookie);
+    token = cookies["nnt_rag_token"] || "";
+    if (!token) {
+      res.status(401).json({ error: "Unauthorized: Missing authorization header" });
+      return;
+    }
+  } else {
     res.status(401).json({ error: "Unauthorized: Missing authorization header" });
-    return;
-  }
-
-  const trimmedHeader = authHeader.trim();
-  if (trimmedHeader === "Bearer") {
-    res.status(401).json({ error: "Unauthorized: Token missing" });
-    return;
-  }
-
-  if (!authHeader.startsWith("Bearer ")) {
-    res.status(401).json({ error: "Unauthorized: Malformed authorization header" });
-    return;
-  }
-
-  const token = authHeader.slice(7).trim();
-  if (!token) {
-    res.status(401).json({ error: "Unauthorized: Token missing" });
     return;
   }
 

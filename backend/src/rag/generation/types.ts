@@ -1,5 +1,9 @@
 import type { LLMProvider } from "../../providers/llm/types.js";
-import type { RetrievedChunk, RetrieveOptions } from "../retrieval/types.js";
+import type {
+  RetrievedChunk,
+  RetrieveOptions,
+  RetrievalDebugInfo,
+} from "../retrieval/types.js";
 
 export interface Citation {
   documentId: string;
@@ -42,4 +46,5 @@ export interface GenerateAnswerResult {
   retrievedChunks: RetrievedChunk[];
   modelName: string;
   providerName: string;
+  retrievalDebug: RetrievalDebugInfo;
 }

@@ -1,4 +1,4 @@
-import type { Citation } from "./chat";
+import type { Citation, RetrievalDebugInfo } from "./chat";
 
 export type IngestionEventType =
   | "connection.connected"
@@ -79,6 +79,7 @@ export interface ChatCompletePayload {
   remainingMessages: number;
   warning: string | null;
   isNewConversation: boolean;
+  retrievalDebug?: RetrievalDebugInfo;
 }
 
 export interface ChatErrorPayload {

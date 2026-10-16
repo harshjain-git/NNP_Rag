@@ -1,15 +1,33 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { ApiClientError } from "@/lib/api/client";
 import { EyeIcon, EyeOffIcon } from "@/components/ui/icons";
 import { AuthCard } from "@/components/auth/auth-card";
 import { EMAIL_REGEX } from "@/lib/validation";
 
+const getSafeRedirect = (url: string | null): string => {
+  if (!url) return "/";
+  if (url.startsWith("/") && !url.startsWith("//") && !url.includes("://")) {
+    return url;
+  }
+  return "/";
+};
+
 export default function RegisterPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#212121]" />}>
+      <RegisterForm />
+    </Suspense>
+  );
+}
+
+function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTarget = getSafeRedirect(searchParams.get("redirect"));
   const { register, isAuthenticated, isLoading } = useAuth();
 
   const [form, setForm] = useState({
@@ -26,9 +44,9 @@ export default function RegisterPage() {
   // Redirect if already authenticated
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      router.replace("/");
+      router.replace(redirectTarget);
     }
-  }, [isAuthenticated, isLoading, router]);
+  }, [isAuthenticated, isLoading, router, redirectTarget]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -55,7 +73,7 @@ export default function RegisterPage() {
     try {
       // Send only name, email, and password to backend (confirmPassword is client-side only)
       await register({ name, email: email.toLowerCase(), password });
-      router.push("/");
+      router.push(redirectTarget);
     } catch (err) {
       setError(
         err instanceof ApiClientError || err instanceof Error

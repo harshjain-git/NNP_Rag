@@ -71,7 +71,7 @@ export interface AuthContextType {
   isLoading: boolean;
   login: (payload: LoginPayload) => Promise<AuthResponse>;
   register: (payload: RegisterPayload) => Promise<AuthResponse>;
-  logout: () => void;
+  logout: () => Promise<void> | void;
   updateUser: (user: User) => void;
 }
 
@@ -107,8 +107,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return res;
   };
 
-  const logout = (): void => {
-    apiLogout();
+  const logout = async (): Promise<void> => {
+    try {
+      await apiLogout();
+    } catch {}
     if (typeof window !== "undefined") {
       localStorage.removeItem(USER_KEY);
     }

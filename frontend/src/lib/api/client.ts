@@ -59,7 +59,7 @@ export async function request<T>(
 
   let res: Response;
   try {
-    res = await fetch(url, { ...rest, headers, body });
+    res = await fetch(url, { ...rest, headers, body, credentials: "include" });
   } catch (err) {
     throw new ApiClientError(
       err instanceof Error ? err.message : "Network request failed",

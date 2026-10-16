@@ -8,6 +8,7 @@ import {
   prepareConversation,
   persistChatExchange,
 } from "../services/conversation.service.js";
+import { ROLE_NAMES } from "../database/schema.js";
 import type {
   ChatSendPayload,
   ChatCancelPayload,
@@ -223,7 +224,11 @@ export const handleClientConnection = (
           isNewConversation
         );
 
-        sendToClient(ws, "chat.complete", {
+        const isAuthorizedForDebug =
+          session.user?.role === ROLE_NAMES.ADMIN ||
+          session.user?.role === ROLE_NAMES.SUPER_ADMIN;
+
+        const completePayload: Record<string, unknown> = {
           requestId,
           conversationId: persisted.finalConversationId,
           answer: result.answer,
@@ -235,7 +240,13 @@ export const handleClientConnection = (
           remainingMessages: persisted.remainingMessages,
           warning: persisted.warning,
           isNewConversation: persisted.isNewConversation,
-        });
+        };
+
+        if (isAuthorizedForDebug) {
+          completePayload.retrievalDebug = result.retrievalDebug;
+        }
+
+        sendToClient(ws, "chat.complete", completePayload);
       } catch (err) {
         if (abortController.signal.aborted) {
           sendToClient(ws, "chat.error", { requestId, error: "Request cancelled", statusCode: 499 });

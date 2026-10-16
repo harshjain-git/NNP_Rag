@@ -17,6 +17,8 @@ import type {
   RetrievedChunk,
   RetrieveOptions,
   PGVectorRetrieverOptions,
+  RetrievalDebugChunk,
+  RetrieveChunksResult,
 } from "./types.js";
 
 
@@ -50,16 +52,19 @@ export class PGVectorRetriever extends BaseRetriever {
 }
 
 /**
- * Retrieves the most relevant document chunks for a query using cosine similarity in pgvector.
+ * Retrieves the most relevant document chunks for a query using cosine similarity in pgvector,
+ * while capturing all candidate chunks, filter reasons, and LLM eligibility for debug inspection.
  */
-export const retrieveChunks = async (
+export const retrieveChunksWithDebug = async (
   query: string,
   options?: RetrieveOptions
-): Promise<RetrievedChunk[]> => {
+): Promise<RetrieveChunksResult> => {
   const trimmed = query.trim();
   const runtimeConfig = configService.getProjectConfig();
   const topK = options?.topK ?? runtimeConfig.retrieval.topK ?? DEFAULT_RETRIEVAL_TOP_K;
-  if (!trimmed || topK <= 0) return [];
+  if (!trimmed || topK <= 0) {
+    return { chunks: [], debugChunks: [] };
+  }
 
   const provider = options?.embeddingProvider ?? getEmbeddingProvider();
   const queryEmbedding = await provider.generateEmbedding(trimmed);
@@ -94,40 +99,102 @@ export const retrieveChunks = async (
   const minSim = options?.minSimilarity ?? runtimeConfig.retrieval.minSimilarity ?? DEFAULT_MIN_SIMILARITY;
 
   const uniqueChunks: RetrievedChunk[] = [];
+  const debugChunks: RetrievalDebugChunk[] = [];
   const seenContents = new Set<string>();
 
   for (const r of rows) {
-    if (minSim !== undefined && Number(r.similarity) < minSim) {
+    const rawSim = Number(r.similarity);
+    const formattedSim = Number(rawSim.toFixed(4));
+    const normalized = r.content.trim().toLowerCase();
+
+    if (minSim !== undefined && rawSim < minSim) {
+      debugChunks.push({
+        id: r.id,
+        chunkId: r.id,
+        documentId: r.documentId,
+        filename: r.filename,
+        pageNumber: r.pageNumber,
+        chunkIndex: r.chunkIndex,
+        similarity: formattedSim,
+        passedToLLM: false,
+        filterReason: `Similarity score (${formattedSim.toFixed(4)}) is below the minimum similarity threshold (${minSim.toFixed(4)})`,
+      });
       continue;
     }
 
     // Deduplicate identical or whitespace-normalized chunks across pages
-    const normalized = r.content.trim().toLowerCase();
     if (seenContents.has(normalized)) {
+      debugChunks.push({
+        id: r.id,
+        chunkId: r.id,
+        documentId: r.documentId,
+        filename: r.filename,
+        pageNumber: r.pageNumber,
+        chunkIndex: r.chunkIndex,
+        similarity: formattedSim,
+        passedToLLM: false,
+        filterReason: "Duplicate content detected across document pages",
+      });
       continue;
     }
     seenContents.add(normalized);
 
-    uniqueChunks.push({
+    if (uniqueChunks.length >= topK) {
+      debugChunks.push({
+        id: r.id,
+        chunkId: r.id,
+        documentId: r.documentId,
+        filename: r.filename,
+        pageNumber: r.pageNumber,
+        chunkIndex: r.chunkIndex,
+        similarity: formattedSim,
+        passedToLLM: false,
+        filterReason: `Exceeded topK limit of ${topK}`,
+      });
+      continue;
+    }
+
+    const chunkItem: RetrievedChunk = {
       id: r.id,
       documentId: r.documentId,
       filename: r.filename,
       content: r.content,
       pageNumber: r.pageNumber,
       chunkIndex: r.chunkIndex,
-      similarity: Number(Number(r.similarity).toFixed(4)),
+      similarity: formattedSim,
       metadata: (r.metadata as Record<string, unknown>) ?? {},
-    });
+    };
 
-    if (uniqueChunks.length >= topK) {
-      break;
-    }
+    uniqueChunks.push(chunkItem);
+    debugChunks.push({
+      id: r.id,
+      chunkId: r.id,
+      documentId: r.documentId,
+      filename: r.filename,
+      pageNumber: r.pageNumber,
+      chunkIndex: r.chunkIndex,
+      similarity: formattedSim,
+      passedToLLM: true,
+      filterReason: null,
+    });
   }
 
-  return uniqueChunks;
+  return { chunks: uniqueChunks, debugChunks };
+};
+
+/**
+ * Retrieves the most relevant document chunks for a query using cosine similarity in pgvector.
+ */
+export const retrieveChunks = async (
+  query: string,
+  options?: RetrieveOptions
+): Promise<RetrievedChunk[]> => {
+  const result = await retrieveChunksWithDebug(query, options);
+  return result.chunks;
 };
 
 export const chunkRetriever = {
   retrieveChunks,
+  retrieveChunksWithDebug,
 };
 

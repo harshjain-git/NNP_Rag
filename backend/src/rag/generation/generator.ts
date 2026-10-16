@@ -1,5 +1,10 @@
 import { retrieveChunks, chunkRetriever } from "../retrieval/retriever.js";
-import type { RetrievedChunk, RetrieveOptions } from "../retrieval/types.js";
+import type {
+  RetrievedChunk,
+  RetrieveOptions,
+  RetrievalDebugChunk,
+  ContextChunk,
+} from "../retrieval/types.js";
 import { getLLMProvider } from "../../providers/llm/index.js";
 import {
   DEFAULT_INSUFFICIENT_EVIDENCE_MESSAGE,
@@ -70,20 +75,44 @@ export const generateAnswerStream = async (
       retrievedChunks: [],
       modelName: "none",
       providerName: "none",
+      retrievalDebug: {
+        retrievedChunks: [],
+        contextChunks: [],
+        filterReason: "Empty query provided.",
+      },
     };
   }
 
   const provider = options?.llmProvider || getLLMProvider();
 
-  // 1. Retrieve relevant chunks using pgvector
+  // 1. Retrieve relevant chunks using pgvector with candidate debug tracking
   const retrieveOpts: RetrieveOptions = {};
   if (options?.topK !== undefined) retrieveOpts.topK = options.topK;
   if (options?.documentId !== undefined) retrieveOpts.documentId = options.documentId;
   if (options?.minSimilarity !== undefined) retrieveOpts.minSimilarity = options.minSimilarity;
   if (options?.embeddingProvider !== undefined) retrieveOpts.embeddingProvider = options.embeddingProvider;
 
-  const retrieveFn = options?.retriever ?? chunkRetriever.retrieveChunks;
-  const retrievedChunks = await retrieveFn(trimmedQuery, retrieveOpts);
+  let retrievedChunks: RetrievedChunk[] = [];
+  let debugCandidates: RetrievalDebugChunk[] = [];
+
+  if (options?.retriever) {
+    retrievedChunks = await options.retriever(trimmedQuery, retrieveOpts);
+    debugCandidates = retrievedChunks.map((c) => ({
+      id: c.id,
+      chunkId: c.id,
+      documentId: c.documentId,
+      filename: c.filename,
+      pageNumber: c.pageNumber,
+      chunkIndex: c.chunkIndex,
+      similarity: c.similarity,
+      passedToLLM: true,
+      filterReason: null,
+    }));
+  } else {
+    const retrievalResult = await chunkRetriever.retrieveChunksWithDebug(trimmedQuery, retrieveOpts);
+    retrievedChunks = retrievalResult.chunks;
+    debugCandidates = retrievalResult.debugChunks;
+  }
 
   // 2. Pre-generation evidence sufficiency check
   const runtimeConfig = configService.getProjectConfig();
@@ -91,6 +120,17 @@ export const generateAnswerStream = async (
   const sufficiency = checkEvidenceSufficiency(retrievedChunks, minScore);
 
   if (!sufficiency.isSufficient) {
+    const updatedDebugChunks = debugCandidates.map((c) => {
+      if (c.passedToLLM) {
+        return {
+          ...c,
+          passedToLLM: false,
+          filterReason: sufficiency.reason || "Evidence sufficiency threshold not met",
+        };
+      }
+      return c;
+    });
+
     await options.onToken(DEFAULT_INSUFFICIENT_EVIDENCE_MESSAGE);
     return {
       answer: DEFAULT_INSUFFICIENT_EVIDENCE_MESSAGE,
@@ -100,6 +140,11 @@ export const generateAnswerStream = async (
       retrievedChunks,
       modelName: provider.modelName,
       providerName: provider.providerName,
+      retrievalDebug: {
+        retrievedChunks: updatedDebugChunks,
+        contextChunks: [],
+        filterReason: sufficiency.reason,
+      },
     };
   }
 
@@ -109,12 +154,24 @@ export const generateAnswerStream = async (
     try {
       const activePrompt = await promptsService.getActivePrompt("system");
       systemPrompt = activePrompt?.content || DEFAULT_RAG_SYSTEM_PROMPT;
-    } catch {
+    } catch (err) {
+      console.warn("Failed to retrieve active system prompt from database:", err);
       systemPrompt = DEFAULT_RAG_SYSTEM_PROMPT;
     }
   }
 
-  // 4. Build prompt
+  // 4. Build prompt and context chunks
+  const contextChunks: ContextChunk[] = retrievedChunks.map((c) => ({
+    id: c.id,
+    chunkId: c.id,
+    documentId: c.documentId,
+    filename: c.filename,
+    pageNumber: c.pageNumber,
+    chunkIndex: c.chunkIndex,
+    similarity: c.similarity,
+    text: c.content,
+    content: c.content,
+  }));
   const { systemPrompt: finalSystemPrompt, userPrompt } = buildRAGPrompt(
     trimmedQuery,
     retrievedChunks,
@@ -171,17 +228,23 @@ export const generateAnswerStream = async (
   // 6. Check for insufficient evidence sentinel from LLM
   const match = rawResponse.match(/^INSUFFICIENT_EVIDENCE:\s*(.*)/is);
   if (match) {
+    const refusalReason =
+      match[1]?.trim() ||
+      "The retrieved documents do not contain sufficient evidence to answer this question.";
     await options.onToken(DEFAULT_INSUFFICIENT_EVIDENCE_MESSAGE);
     return {
       answer: DEFAULT_INSUFFICIENT_EVIDENCE_MESSAGE,
       evidenceSufficient: false,
-      refusalReason:
-        match[1]?.trim() ||
-        "The retrieved documents do not contain sufficient evidence to answer this question.",
+      refusalReason,
       citations: [],
       retrievedChunks,
       modelName: provider.modelName,
       providerName: provider.providerName,
+      retrievalDebug: {
+        retrievedChunks: debugCandidates,
+        contextChunks,
+        filterReason: refusalReason,
+      },
     };
   }
 
@@ -199,6 +262,11 @@ export const generateAnswerStream = async (
     retrievedChunks,
     modelName: provider.modelName,
     providerName: provider.providerName,
+    retrievalDebug: {
+      retrievedChunks: debugCandidates,
+      contextChunks,
+      filterReason: null,
+    },
   };
 };
 

@@ -8,7 +8,7 @@ import { JWT_SECRET } from "../src/config/env.js";
 import { ROLE_NAMES } from "../src/database/schema.js";
 import { promptsService } from "../src/services/prompts.service.js";
 import { chunkRetriever } from "../src/rag/retrieval/retriever.js";
-import { getLLMProvider } from "../src/providers/llm/index.js";
+import { getLLMProvider, GroqLLMProvider, OllamaLLMProvider, GeminiLLMProvider } from "../src/providers/llm/index.js";
 import { db, pool } from "../src/database/client.js";
 import { users, roles } from "../src/database/schema.js";
 import { eq } from "drizzle-orm";
@@ -61,13 +61,26 @@ describe("End-to-End Chat System Prompt Integration (POST /api/chat)", () => {
     // 2. Mock chunkRetriever to provide valid evidence above sufficiency threshold
     mock.method(chunkRetriever, "retrieveChunks", async () => [mockEvidenceChunk]);
 
-    // 3. Mock active LLM provider to intercept generation options and avoid external network calls
-    const activeProvider = getLLMProvider();
-    mock.method(activeProvider, "generate", async (_prompt: string, options?: GenerateOptions): Promise<string> => {
+    // 3. Mock active LLM providers to intercept generation options and avoid external network calls
+    const mockGenerate = async function (_prompt: string, options?: GenerateOptions): Promise<string> {
       providerCalls++;
       capturedSystemPrompt = options?.systemPrompt;
       return "According to company policy, employees receive 20 days [Source 1].";
-    });
+    };
+    const mockGenerateStream = async function (_prompt: string, onToken: (t: string) => Promise<void> | void, options?: any): Promise<string> {
+      providerCalls++;
+      capturedSystemPrompt = options?.systemPrompt;
+      const text = "According to company policy, employees receive 20 days [Source 1].";
+      await onToken(text);
+      return text;
+    };
+
+    mock.method(GroqLLMProvider.prototype, "generate", mockGenerate);
+    mock.method(GroqLLMProvider.prototype, "generateStream", mockGenerateStream);
+    mock.method(OllamaLLMProvider.prototype, "generate", mockGenerate);
+    mock.method(OllamaLLMProvider.prototype, "generateStream", mockGenerateStream);
+    mock.method(GeminiLLMProvider.prototype, "generate", mockGenerate);
+    mock.method(GeminiLLMProvider.prototype, "generateStream", mockGenerateStream);
 
     // 4. Start test server on ephemeral port
     await new Promise<void>((resolve) => {

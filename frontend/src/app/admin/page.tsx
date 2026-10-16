@@ -11,9 +11,14 @@ import { Topbar } from "@/components/layout/topbar";
 import { PromptList } from "@/components/admin/prompt-list";
 import { PromptFormModal } from "@/components/admin/prompt-form-modal";
 import { PlusIcon, RefreshIcon, CloseIcon, ShieldIcon } from "@/components/ui/icons";
-import type { Prompt, PromptType, CreatePromptPayload, UpdatePromptPayload } from "@/types";
+import type { Prompt, CreatePromptPayload, UpdatePromptPayload } from "@/types";
 
-const FILTER_TYPES: Array<PromptType | "all"> = ["all", "system", "rag", "citation"];
+type FilterStatus = "all" | "active" | "draft";
+const FILTER_STATUSES: Array<{ id: FilterStatus; label: string }> = [
+  { id: "all", label: "All Prompts" },
+  { id: "active", label: "Active" },
+  { id: "draft", label: "Draft" },
+];
 
 function AdminView() {
   const router = useRouter();
@@ -21,7 +26,7 @@ function AdminView() {
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [selectedType, setSelectedType] = useState<PromptType | "all">("all");
+  const [selectedStatus, setSelectedStatus] = useState<FilterStatus>("all");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState<Prompt | null>(null);
 
@@ -29,7 +34,7 @@ function AdminView() {
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
-      router.push("/login");
+      router.push("/login?redirect=/admin");
     }
   }, [authLoading, isAuthenticated, router]);
 
@@ -79,9 +84,9 @@ function AdminView() {
   };
 
   const filteredPrompts =
-    selectedType === "all"
+    selectedStatus === "all"
       ? prompts
-      : prompts.filter((p) => p.type === selectedType);
+      : prompts.filter((p) => p.status === selectedStatus);
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[#212121] text-zinc-100 font-sans">
@@ -174,20 +179,20 @@ function AdminView() {
               </div>
             )}
 
-            {/* Type Filters */}
+            {/* Status Filters */}
             <div className="flex items-center gap-1.5 text-xs">
-              {FILTER_TYPES.map((t) => (
+              {FILTER_STATUSES.map(({ id, label }) => (
                 <button
-                  key={t}
+                  key={id}
                   type="button"
-                  onClick={() => setSelectedType(t)}
-                  className={`px-3 py-1 rounded-full font-medium transition-colors capitalize ${
-                    selectedType === t
+                  onClick={() => setSelectedStatus(id)}
+                  className={`px-3 py-1 rounded-full font-medium transition-colors ${
+                    selectedStatus === id
                       ? "bg-white text-black"
                       : "bg-[#262626] text-zinc-400 hover:text-zinc-200 border border-zinc-800"
                   }`}
                 >
-                  {t === "all" ? "All Prompts" : t}
+                  {label}
                 </button>
               ))}
             </div>

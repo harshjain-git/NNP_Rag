@@ -1,7 +1,7 @@
 {
   "models": {
     "llmProvider": "groq",
-    "llmModel": "openai/gpt-oss-120b",
+    "llmModel": "qwen/qwen3.8-27b",
     "embeddingProvider": "local",
     "embeddingModel": "Xenova/jina-embeddings-v2-small-en",
     "supportedLLMProviders": [
@@ -12,7 +12,25 @@
     "supportedEmbeddingProviders": [
       "local"
     ],
-    "embeddingDimension": 512
+    "embeddingDimension": 512,
+    "availableModels": {
+      "ollama": [
+        "hf.co/unsloth/Qwen3.5-0.8B-GGUF:Q4_K_M"
+      ],
+      "groq": [
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "qwen/qwen3.8-27b",
+        "allam-2-7b"
+      ],
+      "gemini": [
+        "gemini-3.8-flash",
+        "gemini-3.5-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite"
+      ]
+    }
   },
   "retrieval": {
     "topK": 8,

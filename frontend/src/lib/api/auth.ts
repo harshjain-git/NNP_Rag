@@ -56,6 +56,12 @@ export async function changePassword(
   });
 }
 
-export function logout(): void {
-  setAuthToken(null);
+export async function logout(): Promise<void> {
+  try {
+    await request("/api/auth/logout", { method: "POST" });
+  } catch {
+    // Non-fatal if server is unreachable
+  } finally {
+    setAuthToken(null);
+  }
 }

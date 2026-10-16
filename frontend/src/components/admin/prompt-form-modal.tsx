@@ -36,7 +36,7 @@ function PromptFormContent({
 }: Omit<PromptFormModalProps, "isOpen">) {
   const [name, setName] = useState(initialData?.name || "");
   const [content, setContent] = useState(initialData?.content || "");
-  const [type, setType] = useState<PromptType>(initialData?.type || "system");
+  const type: PromptType = "system";
   const [status, setStatus] = useState<PromptStatus>(initialData?.status || "active");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -98,15 +98,12 @@ function PromptFormContent({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-zinc-300 mb-1.5">Type</label>
-              <select
-                value={type}
-                onChange={(e) => setType(e.target.value as PromptType)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-[#2f2f2f] border border-zinc-700/80 text-sm text-white focus:outline-hidden focus:border-blue-500"
-              >
-                <option value="system">System (Generation)</option>
-                <option value="rag">RAG (Context Builder)</option>
-                <option value="citation">Citation (Source Extractor)</option>
-              </select>
+              <input
+                type="text"
+                value="System Prompt"
+                disabled
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#222] border border-zinc-800 text-sm text-zinc-400 cursor-not-allowed"
+              />
             </div>
 
             <div>
